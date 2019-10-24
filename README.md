@@ -1,6 +1,8 @@
 # w-auto-sequelize
 A wrapper for sequelize-auto.
 
+Fork from: [sequelize-auto](https://github.com/sequelize/sequelize-auto)
+
 ![language](https://img.shields.io/badge/language-JavaScript-orange.svg) 
 [![npm version](http://img.shields.io/npm/v/w-auto-sequelize.svg?style=flat)](https://npmjs.org/package/w-auto-sequelize) 
 [![Build Status](https://travis-ci.org/yuda-lyu/w-auto-sequelize.svg?branch=master)](https://travis-ci.org/yuda-lyu/w-auto-sequelize) 
