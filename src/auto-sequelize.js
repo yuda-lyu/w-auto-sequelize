@@ -431,8 +431,6 @@ AutoSequelize.prototype.run = function(callback) {
             self.sequelize.close()
 
             // typescript generate tables
-            console.log('text', text)
-            console.log('self.options.typescript', self.options.typescript)
             if (self.options.typescript) typescriptFiles[1] = tsHelper.model.generateTableModels(_.keys(text), self.options.spaces, self.options.indentation, self.options.camelCase, self.options.camelCaseForFileName)
 
             if (self.options.directory) {
