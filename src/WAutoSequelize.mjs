@@ -34,9 +34,9 @@ function WAutoSequelize(opt = {}) {
         directory,
         host,
         port,
-        additional: {
-            timestamps: false
-        },
+        // additional: {
+        //     timestamps: false
+        // },
     }
 
     //check

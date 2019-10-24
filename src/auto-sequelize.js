@@ -291,10 +291,14 @@ AutoSequelize.prototype.run = function(callback) {
                         text[table] += spaces + spaces + spaces + attr + ': DataTypes.' + self.tables[table][field][attr]
                     }
                     else {
+                        let _val = self.tables[table][field][attr]
                         let _attr = (self.tables[table][field][attr] || '').toLowerCase()
                         let val = quoteWrapper + self.tables[table][field][attr] + quoteWrapper
 
-                        if (_attr === 'boolean' || _attr === 'bit(1)' || _attr === 'bit') {
+                        if (_attr === '') { //原本具有autoIncrement或comment欄位值會被強制添加雙引號, 此處新增判斷若為原本鍵就使用原值
+                            val = _val
+                        }
+                        else if (_attr === 'boolean' || _attr === 'bit(1)' || _attr === 'bit') {
                             val = 'DataTypes.BOOLEAN'
                         }
                         else if (_attr.match(/^(smallint|mediumint|tinyint|int)/)) {
@@ -427,6 +431,8 @@ AutoSequelize.prototype.run = function(callback) {
             self.sequelize.close()
 
             // typescript generate tables
+            console.log('text', text)
+            console.log('self.options.typescript', self.options.typescript)
             if (self.options.typescript) typescriptFiles[1] = tsHelper.model.generateTableModels(_.keys(text), self.options.spaces, self.options.indentation, self.options.camelCase, self.options.camelCaseForFileName)
 
             if (self.options.directory) {
