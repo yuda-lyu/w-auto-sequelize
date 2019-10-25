@@ -292,8 +292,8 @@ AutoSequelize.prototype.run = function(callback) {
                     }
                     else {
                         let _val = self.tables[table][field][attr]
-                        let _attr = (self.tables[table][field][attr] || '').toLowerCase()
-                        let val = quoteWrapper + self.tables[table][field][attr] + quoteWrapper
+                        let _attr = _.toString((_val || '')).toLowerCase()
+                        let val = quoteWrapper + _val + quoteWrapper
 
                         if (_attr === '') { //原本具有autoIncrement或comment欄位值會被強制添加雙引號, 此處新增判斷若為原本鍵就使用原值
                             val = _val
