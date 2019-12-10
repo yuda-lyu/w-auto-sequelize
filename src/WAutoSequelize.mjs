@@ -16,6 +16,7 @@ import AutoSequelize from './auto-sequelize.js'
  * @param {String} [opt.directory='./models'] 輸入models儲存的資料夾名稱字串，預設'./models'
  * @param {String} [opt.host='localhost'] 輸入連線主機host位址字串，預設'localhost'
  * @param {Integer} [opt.port=null] 輸入連線主機port整數，預設null
+ * @param {String} [opt.storage=''] 輸入sqlite檔案位置字串，預設''
  * @returns {Promise} 回傳Promise，resolve回傳產生的models資料，reject回傳錯誤訊息
  */
 function WAutoSequelize(opt = {}) {
@@ -29,11 +30,13 @@ function WAutoSequelize(opt = {}) {
     let directory = get(opt, 'directory', './models')
     let host = get(opt, 'host', 'localhost')
     let port = toInteger(get(opt, 'port', null))
+    let storage = get(opt, 'storage', '')
     let options = {
         dialect,
         directory,
         host,
         port,
+        storage,
         // additional: {
         //     timestamps: false
         // },
