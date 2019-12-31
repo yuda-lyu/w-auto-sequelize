@@ -5,7 +5,7 @@ let opt = {
     database: 'worm',
     username: 'username',
     password: 'password',
-    dialect: 'mssql',
+    dialect: 'mssql', //要測試才會依賴mssql
     directory: './models',
     host: 'localhost',
     port: 1433,
@@ -18,3 +18,5 @@ was(opt)
     .catch((err) => {
         console.log(err)
     })
+
+//node --experimental-modules --es-module-specifier-resolution=node g.mjs
