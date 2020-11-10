@@ -13,10 +13,10 @@ let opt = {
 
 was(opt)
     .then((res) => {
-        console.log(JSON.stringify(res, null, 4))
+        console.log('then', JSON.stringify(res, null, 4))
     })
     .catch((err) => {
-        console.log(err)
+        console.log('catch', err)
     })
 
 //node --experimental-modules --es-module-specifier-resolution=node scla.mjs

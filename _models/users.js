@@ -10,7 +10,7 @@ module.exports = function(sequelize, DataTypes) {
 			comment: null
 		},
 		'name': {
-			type: DataTypes.TEXT,
+			type: DataTypes.STRING,
 			allowNull: true,
 			autoIncrement: false,
 			comment: null

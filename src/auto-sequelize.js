@@ -9,7 +9,9 @@ let dialects = require('./dialects')
 let _ = require('lodash')
 let SqlString = require('./sql-string')
 let tsHelper = require('./ts-helper')
-let CLIEngine = require('eslint').CLIEngine
+//let CLIEngine = require('eslint').CLIEngine
+let { ESLint } = require('eslint')
+
 
 function AutoSequelize(database, username, password, options) {
     if (options && options.dialect === 'sqlite' && !options.storage) {
@@ -319,7 +321,12 @@ AutoSequelize.prototype.run = function(callback) {
                             val = 'DataTypes.STRING' + (!_.isNull(length) ? length : '')
                         }
                         else if (_attr.match(/^string|varying|nvarchar/)) {
-                            val = 'DataTypes.STRING'
+                            if (_attr.match(/^nvarchar\(max\)/)) { //實際上MSSql將TEXT轉為nvarchar(MAX), 此處暴力修復
+                                val = 'DataTypes.TEXT'
+                            }
+                            else {
+                                val = 'DataTypes.STRING'
+                            }
                         }
                         else if (_attr.match(/^char/)) {
                             let length = _attr.match(/\(\d+\)/)
@@ -449,9 +456,14 @@ AutoSequelize.prototype.write = function(attributes, typescriptFiles, callback) 
     fs.mkdirSync(path.resolve(self.options.directory), { recursive: true })
 
     async.each(tables, createFile, !self.options.eslint ? callback : function() {
-        let engine = new CLIEngine({ fix: true })
-        let report = engine.executeOnFiles([self.options.directory])
-        CLIEngine.outputFixes(report)
+        // let engine = new CLIEngine({ fix: true })
+        // let report = engine.executeOnFiles([self.options.directory])
+        // CLIEngine.outputFixes(report)
+        //https://eslint.org/docs/developer-guide/nodejs-api#eslint-class
+        //ESLint 7之後已取消CLIEngine, 相關語法移至ESLint, executeOnFiles更名為lintFiles, outputFixes名稱未更動
+        let engine = new ESLint({ fix: true })
+        let report = engine.lintFiles([self.options.directory])
+        ESLint.outputFixes(report)
         callback()
     })
 
