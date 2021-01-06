@@ -5,7 +5,7 @@ let opt = {
     database: 'worm',
     username: 'username',
     password: 'password',
-    dialect: 'mssql', //要測試才會依賴mssql
+    dialect: 'mssql', //要測試故devDependencies才需安裝mssql
     directory: './models',
     host: 'localhost',
     port: 1433,

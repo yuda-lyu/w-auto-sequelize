@@ -1,6 +1,6 @@
 {
   "name": "w-auto-sequelize",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "A wrapper for sequelize-auto.",
   "main": "dist/w-auto-sequelize.umd.js",
   "dependencies": {

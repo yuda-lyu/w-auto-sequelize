@@ -40,6 +40,7 @@ function WAutoSequelize(opt = {}) {
         // additional: {
         //     timestamps: false
         // },
+        // lang: 'esm' //使用sequelize-auto最新版可使用lang="es5" | "es6" | "esm" | "ts", 待測試, 但其對nvarchar(MAX)無法轉回TEXT
     }
 
     //check
