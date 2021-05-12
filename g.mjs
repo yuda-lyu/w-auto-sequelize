@@ -19,4 +19,4 @@ was(opt)
         console.log('catch', err)
     })
 
-//node --experimental-modules --es-module-specifier-resolution=node scla.mjs
+//node --experimental-modules --es-module-specifier-resolution=node g.mjs

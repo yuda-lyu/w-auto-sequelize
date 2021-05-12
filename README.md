@@ -16,7 +16,7 @@ To view documentation or get support, visit [docs](https://yuda-lyu.github.io/w-
 
 ## Installation
 ### Using npm(ES6 module):
-> **Note:** `w-auto-sequelize` depends on `sequelize`, `async`, `eslint`, `fs` and `path`
+> **Note:** `w-auto-sequelize` is mainly dependent on `sequelize`, `async`, `eslint`, `fs` and `path`
 ```alias
 npm i w-auto-sequelize
 ```

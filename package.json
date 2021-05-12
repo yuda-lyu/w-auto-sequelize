@@ -4,18 +4,18 @@
   "description": "A wrapper for sequelize-auto.",
   "main": "dist/w-auto-sequelize.umd.js",
   "dependencies": {
-    "eslint": "^7.19.0",
+    "eslint": "^7.26.0",
     "async": "^3.2.0",
-    "sequelize": "^6.5.0",
-    "lodash": "^4.17.20",
-    "wsemi": "^1.5.45"
+    "sequelize": "^6.6.2",
+    "lodash": "^4.17.21",
+    "wsemi": "^1.5.77"
   },
   "devDependencies": {
     "mssql": "^6.3.1",
-    "w-package-tools": "^1.0.33"
+    "w-package-tools": "^1.0.54"
   },
   "scripts": {
-    "test": "./node_modules/.bin/mocha --require @babel/register",
+    "test": "mocha --parallel --timeout 60000 --experimental-modules --es-module-specifier-resolution=node",
     "deploy": "gh-pages -d docs"
   },
   "repository": {
