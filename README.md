@@ -5,7 +5,6 @@ Fork from: [sequelize-auto](https://github.com/sequelize/sequelize-auto)
 
 ![language](https://img.shields.io/badge/language-JavaScript-orange.svg) 
 [![npm version](http://img.shields.io/npm/v/w-auto-sequelize.svg?style=flat)](https://npmjs.org/package/w-auto-sequelize) 
-[![Build Status](https://travis-ci.org/yuda-lyu/w-auto-sequelize.svg?branch=master)](https://travis-ci.org/yuda-lyu/w-auto-sequelize) 
 [![license](https://img.shields.io/npm/l/w-auto-sequelize.svg?style=flat)](https://npmjs.org/package/w-auto-sequelize) 
 [![gzip file size](http://img.badgesize.io/yuda-lyu/w-auto-sequelize/master/dist/w-auto-sequelize.umd.js.svg?compression=gzip)](https://github.com/yuda-lyu/w-auto-sequelize)
 [![npm download](https://img.shields.io/npm/dt/w-auto-sequelize.svg)](https://npmjs.org/package/w-auto-sequelize) 
