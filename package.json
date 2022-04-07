@@ -1,18 +1,18 @@
 {
   "name": "w-auto-sequelize",
-  "version": "1.0.17",
+  "version": "1.0.20",
   "description": "A wrapper for sequelize-auto.",
   "main": "dist/w-auto-sequelize.umd.js",
   "dependencies": {
     "eslint": "^7.32.0",
-    "async": "^3.2.2",
-    "sequelize": "^6.11.0",
+    "async": "^3.2.3",
+    "sequelize": "^6.18.0",
     "lodash": "^4.17.21",
-    "wsemi": "^1.6.34"
+    "wsemi": "^1.6.54"
   },
   "devDependencies": {
-    "mssql": "^7.3.0",
-    "w-package-tools": "^1.0.59"
+    "mssql": "^8.1.0",
+    "w-package-tools": "^1.0.65"
   },
   "scripts": {
     "test": "mocha --parallel --timeout 60000 --experimental-modules --es-module-specifier-resolution=node",
