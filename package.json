@@ -5,7 +5,7 @@
   "dependencies": {
     "eslint": "^7.32.0",
     "async": "^3.2.4",
-    "sequelize": "^6.18.0",
+    "sequelize": "^6.28.2",
     "lodash": "^4.17.21",
     "wsemi": "^1.6.87"
   },
