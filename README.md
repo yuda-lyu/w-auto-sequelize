@@ -8,6 +8,7 @@ Fork from: [sequelize-auto](https://github.com/sequelize/sequelize-auto)
 [![license](https://img.shields.io/npm/l/w-auto-sequelize.svg?style=flat)](https://npmjs.org/package/w-auto-sequelize) 
 [![gzip file size](http://img.badgesize.io/yuda-lyu/w-auto-sequelize/master/dist/w-auto-sequelize.umd.js.svg?compression=gzip)](https://github.com/yuda-lyu/w-auto-sequelize)
 [![npm download](https://img.shields.io/npm/dt/w-auto-sequelize.svg)](https://npmjs.org/package/w-auto-sequelize) 
+[![npm download](https://img.shields.io/npm/dm/w-auto-sequelize.svg)](https://npmjs.org/package/w-auto-sequelize) 
 [![jsdelivr download](https://img.shields.io/jsdelivr/npm/hm/w-auto-sequelize.svg)](https://www.jsdelivr.com/package/npm/w-auto-sequelize)
 
 ## Documentation
