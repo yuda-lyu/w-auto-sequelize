@@ -1,6 +1,6 @@
 {
   "name": "w-auto-sequelize",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "main": "dist/w-auto-sequelize.umd.js",
   "dependencies": {
     "eslint": "^8.37.0",
