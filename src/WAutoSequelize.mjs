@@ -1,5 +1,5 @@
-import get from 'lodash-es/get'
-import toInteger from 'lodash-es/toInteger'
+import get from 'lodash-es/get.js'
+import toInteger from 'lodash-es/toInteger.js'
 import genPm from 'wsemi/src/genPm.mjs'
 import AutoSequelize from './auto-sequelize.js'
 
