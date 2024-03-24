@@ -1,17 +1,17 @@
 {
   "name": "w-auto-sequelize",
-  "version": "1.0.26",
+  "version": "1.0.27",
   "main": "dist/w-auto-sequelize.umd.js",
   "dependencies": {
     "eslint": "^8.37.0",
     "async": "^3.2.5",
-    "sequelize": "^6.30.0",
+    "sequelize": "^6.37.1",
     "lodash": "^4.17.21",
     "lodash-es": "^4.17.21",
     "wsemi": "^1.7.49"
   },
   "devDependencies": {
-    "mssql": "^9.1.1",
+    "mssql": "^10.0.2",
     "w-package-tools": "^1.0.75"
   },
   "scripts": {
