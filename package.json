@@ -1,18 +1,18 @@
 {
   "name": "w-auto-sequelize",
-  "version": "1.0.27",
+  "version": "1.0.28",
   "main": "dist/w-auto-sequelize.umd.js",
   "dependencies": {
     "eslint": "^8.37.0",
     "async": "^3.2.5",
     "sequelize": "^6.37.1",
     "lodash": "^4.17.21",
-    "lodash-es": "^4.17.21",
-    "wsemi": "^1.7.49"
+    "lodash-es": "^4.18.1",
+    "wsemi": "^1.8.66"
   },
   "devDependencies": {
     "mssql": "^10.0.2",
-    "w-package-tools": "^1.0.75"
+    "w-package-tools": "^1.1.11"
   },
   "scripts": {
     "test": "mocha --parallel --timeout 60000",
