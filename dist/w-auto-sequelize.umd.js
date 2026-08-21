@@ -1,5 +1,5 @@
 /*!
- * w-auto-sequelize v1.0.36
+ * w-auto-sequelize v1.0.37
  * (c) 2018-2021 yuda-lyu(semisphere)
  * Released under the MIT License.
  */
