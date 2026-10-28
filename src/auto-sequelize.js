@@ -13,16 +13,20 @@ let tsHelper = require('./ts-helper')
 let { ESLint } = require('eslint')
 
 
-function AutoSequelize(database, username, password, options) {
+function AutoSequelize(database, username, password, options, logErr) {
     if (options && options.dialect === 'sqlite' && !options.storage) {
         options.storage = database
     }
+
+    //logErr(label, err)為診斷輸出, 由WAutoSequelize提供(見getDiag.mjs, 本檔不直接呼叫console); 未給者不輸出
+    this.logErr = typeof logErr === 'function' ? logErr : function() {}
 
     if (database instanceof Sequelize) {
         this.sequelize = database
     }
     else {
-        this.sequelize = new Sequelize(database, username, password, options || {})
+        //logging只接受函數, 其餘(未給、true等)一律false, 不落回sequelize預設的console.log
+        this.sequelize = new Sequelize(database, username, password, _.assign({}, options, { logging: options && _.isFunction(options.logging) ? options.logging : false }))
     }
 
     this.queryInterface = this.sequelize.getQueryInterface()
@@ -80,7 +84,7 @@ AutoSequelize.prototype.build = function(callback) {
         async.each(tables, mapForeignKeys, mapTables)
 
         function mapTables(err) {
-            if (err) console.error(err)
+            if (err) self.logErr('foreign keys catch', err)
 
             async.each(tables, mapTable, callback)
         }
@@ -153,7 +157,7 @@ AutoSequelize.prototype.run = function(callback) {
 
     function generateText(err) {
         let quoteWrapper = '"'
-        if (err) console.error(err)
+        if (err) self.logErr('tables catch', err)
 
         async.each(_.keys(self.tables), function(table, _callback) {
             let fields = _.keys(self.tables[table])

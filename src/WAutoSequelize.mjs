@@ -2,10 +2,13 @@ import get from 'lodash-es/get.js'
 import toInteger from 'lodash-es/toInteger.js'
 import genPm from 'wsemi/src/genPm.mjs'
 import AutoSequelize from './auto-sequelize.js'
+import { getOptLog, getSecrets, getDiag, getBriefErr, getSqlStmt } from './getDiag.mjs'
 
 
 /**
  * 由指定資料庫生成各表的models資料
+ *
+ * 診斷輸出(sql紀錄與錯誤)皆經單一出口：預設只輸出固定標籤與不含個資之摘要(不含sql全文、資料值、錯誤原文、路徑)，sql紀錄預設關閉；資料庫帳號與密碼於任何輸出(含opt.logDetail與opt.funLog之細節)皆以***遮罩
  *
  * @class
  * @param {Object} [opt={}] 輸入設定物件，預設{}
@@ -17,6 +20,9 @@ import AutoSequelize from './auto-sequelize.js'
  * @param {String} [opt.host='localhost'] 輸入連線主機host位址字串，預設'localhost'
  * @param {Integer} [opt.port=null] 輸入連線主機port整數，預設null
  * @param {String} [opt.storage=''] 輸入sqlite檔案位置字串，預設''
+ * @param {Boolean} [opt.logging=false] 輸入是否紀錄sequelize實際執行的sql指令布林值，預設false，型別錯誤者視同false。為true時預設只輸出敘述種類(如console.log('sql', { stmt: 'SELECT' }))，不輸出sql全文；需搭配opt.logDetail或opt.funLog才取得sql全文(含表名)
+ * @param {Boolean} [opt.logDetail=false] 輸入是否還原診斷輸出之舊版細節布林值，預設false，型別錯誤者視同false。診斷輸出(console)預設只含固定標籤與不含個資之摘要(不含sql全文、錯誤原文、路徑)；為true時還原舊版輸出(sql全文以console.log，建表或外鍵查詢失敗之錯誤物件以console.error)，有洩漏個資之風險，僅供除錯使用。帳號與密碼於任何情形皆以***遮罩
+ * @param {Function} [opt.funLog=null] 輸入診斷輸出函數(label, safe, detail)，預設null，非函數者視同null。給予時診斷輸出只交給此函數(不寫console)：label為固定標籤('sql'、'foreign keys catch'、'tables catch')，safe為不含個資之摘要物件(如{ stmt: 'SELECT' }、{ errType: 'ConnectionError', errCode: 'SQLITE_CANTOPEN' })，detail為完整細節(sql全文字串、錯誤物件之副本；帳號與密碼已遮罩為***)。此函數拋錯或回傳reject之promise皆不影響產生models之流程
  * @returns {Promise} 回傳Promise，resolve回傳產生的models資料，reject回傳錯誤訊息
  */
 function WAutoSequelize(opt = {}) {
@@ -65,8 +71,27 @@ function WAutoSequelize(opt = {}) {
         return pm
     }
 
+    //diag, 診斷輸出之單一出口(R1): src內所有console輸出與傳給sequelize之sql紀錄函數皆經此, 除getDiag.mjs外不得直接呼叫console;
+    //預設只輸出固定標籤與不含個資之摘要, opt.logDetail還原舊版細節, opt.funLog取代console; 帳號與密碼於任何輸出皆遮罩;
+    //其後各路徑共用此快照, 不再讀取使用端的opt
+    let optLog = getOptLog(opt)
+    let diag = getDiag(optLog, getSecrets(username, password))
+
+    //logging, 傳給sequelize之logging函數: 未開啟時為false(sequelize不再以預設logger console.log輸出); 開啟時sequelize以(sql全文, 計時)呼叫, 只取第一個引數;
+    //預設只輸出敘述種類, sql全文為細節; 為函數故亦無logging:true之棄用警告
+    let logSql = (sql) => {
+        diag('sql', { stmt: getSqlStmt(sql) }, () => sql, true)
+    }
+    options.logging = optLog.logging ? logSql : false
+
+    //logErr, 舊版以console.error(err)輸出之站點(建表清單與外鍵查詢失敗, 其後仍照常產生models, 故不影響resolve/reject)改經此:
+    //預設只輸出標籤與{ errType, errCode }(仍走console.error), 錯誤物件為細節
+    let logErr = (label, err) => {
+        diag(label, getBriefErr(err), () => err, true, 'error')
+    }
+
     //auto
-    let auto = new AutoSequelize(database, username, password, options)
+    let auto = new AutoSequelize(database, username, password, options, logErr)
 
     //run
     auto.run(function (err) {

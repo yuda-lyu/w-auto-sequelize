@@ -1,0 +1,114 @@
+{
+  "res": {
+    "tables": {
+      "depts": {
+        "id": {
+          "type": "VARCHAR(50)",
+          "allowNull": false,
+          "primaryKey": true,
+          "unique": true
+        },
+        "title": {
+          "type": "NVARCHAR(50)",
+          "allowNull": true,
+          "primaryKey": false,
+          "unique": false
+        }
+      },
+      "users": {
+        "id": {
+          "type": "VARCHAR(50)",
+          "allowNull": false,
+          "primaryKey": true,
+          "unique": true
+        },
+        "name": {
+          "type": "NVARCHAR(50)",
+          "allowNull": true,
+          "primaryKey": false,
+          "unique": false
+        },
+        "score": {
+          "type": "FLOAT",
+          "allowNull": true,
+          "defaultValue": "1.5",
+          "primaryKey": false,
+          "unique": false
+        },
+        "note": {
+          "type": "TEXT",
+          "allowNull": true,
+          "primaryKey": false,
+          "unique": false
+        },
+        "deptId": {
+          "type": "VARCHAR(50)",
+          "allowNull": true,
+          "primaryKey": false,
+          "unique": false,
+          "references": {
+            "model": "depts",
+            "key": "id"
+          },
+          "foreignKey": {
+            "source_table": "users",
+            "id": 0,
+            "seq": 0,
+            "target_table": "depts",
+            "source_column": "deptId",
+            "target_column": "id",
+            "on_update": "NO ACTION",
+            "on_delete": "NO ACTION",
+            "match": "NONE",
+            "isForeignKey": true,
+            "foreignSources": {
+              "source_table": "users",
+              "target_table": "depts",
+              "source_column": "deptId",
+              "target_column": "id"
+            }
+          }
+        }
+      }
+    },
+    "foreignKeys": {
+      "users": {
+        "deptId": {
+          "source_table": "users",
+          "id": 0,
+          "seq": 0,
+          "target_table": "depts",
+          "source_column": "deptId",
+          "target_column": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE",
+          "isForeignKey": true,
+          "foreignSources": {
+            "source_table": "users",
+            "target_table": "depts",
+            "source_column": "deptId",
+            "target_column": "id"
+          }
+        }
+      }
+    }
+  },
+  "files": {
+    "depts.js": "/* jshint indent: 1 */\n\nmodule.exports = function(sequelize, DataTypes) {\n\treturn sequelize.define('depts', {\n\t\t'id': {\n\t\t\ttype: DataTypes.STRING(50),\n\t\t\tallowNull: false,\n\t\t\tprimaryKey: true,\n\t\t\tunique: \"true\"\n\t\t},\n\t\t'title': {\n\t\t\ttype: DataTypes.STRING,\n\t\t\tallowNull: true,\n\t\t\tunique: false\n\t\t}\n\t}, {\n\t\ttableName: 'depts'\n\t});\n};\n",
+    "users.js": "/* jshint indent: 1 */\n\nmodule.exports = function(sequelize, DataTypes) {\n\treturn sequelize.define('users', {\n\t\t'id': {\n\t\t\ttype: DataTypes.STRING(50),\n\t\t\tallowNull: false,\n\t\t\tprimaryKey: true,\n\t\t\tunique: \"true\"\n\t\t},\n\t\t'name': {\n\t\t\ttype: DataTypes.STRING,\n\t\t\tallowNull: true,\n\t\t\tunique: false\n\t\t},\n\t\t'score': {\n\t\t\ttype: DataTypes.FLOAT,\n\t\t\tallowNull: true,\n\t\t\tdefaultValue: '1.5',\n\t\t\tunique: false\n\t\t},\n\t\t'note': {\n\t\t\ttype: DataTypes.TEXT,\n\t\t\tallowNull: true,\n\t\t\tunique: false\n\t\t},\n\t\t'deptId': {\n\t\t\ttype: DataTypes.STRING(50),\n\t\t\tallowNull: true,\n\t\t\tunique: false,\n\t\t\treferences: \"[object Object]\",\n\t\t\treferences: {\n\t\t\t\tmodel: 'depts',\n\t\t\t\tkey: 'id'\n\t\t\t}\n\t\t}\n\t}, {\n\t\ttableName: 'users'\n\t});\n};\n"
+  },
+  "oldLines": [
+    "log: Executing (default): SELECT name FROM `sqlite_master` WHERE type='table' and name!='sqlite_sequence';",
+    "log: Executing (default): PRAGMA foreign_key_list(depts);",
+    "log: Executing (default): PRAGMA foreign_key_list(users);",
+    "log: Executing (default): PRAGMA TABLE_INFO(`depts`);",
+    "log: Executing (default): PRAGMA TABLE_INFO(`users`);",
+    "log: Executing (default): PRAGMA INDEX_LIST(`depts`)",
+    "log: Executing (default): PRAGMA INDEX_LIST(`users`)",
+    "log: Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_depts_1`)",
+    "log: Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_users_1`)",
+    "log: Executing (default): PRAGMA foreign_key_list(`depts`)",
+    "log: Executing (default): PRAGMA foreign_key_list(`users`)"
+  ]
+}
