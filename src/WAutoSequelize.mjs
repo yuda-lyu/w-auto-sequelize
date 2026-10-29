@@ -1,14 +1,44 @@
+import path from 'path'
 import get from 'lodash-es/get.js'
 import toInteger from 'lodash-es/toInteger.js'
 import genPm from 'wsemi/src/genPm.mjs'
+import getDiag from 'wsemi/src/getDiag.mjs'
+import getDiagSecrets from 'wsemi/src/getDiagSecrets.mjs'
 import AutoSequelize from './auto-sequelize.js'
-import { getOptLog, getSecrets, getDiag, getBriefErr, getSqlStmt } from './getDiag.mjs'
+import getSqlStmt from './getSqlStmt.mjs'
+
+
+//診斷輸出與遮罩由wsemi之getDiag提供(規則見wsemi之R-DIAG-01), 本套件只宣告秘密來源、代碼集合、錯誤類別名、巢狀錯誤鍵與safe欄位
+
+//sequelize之錯誤類別名(程式識別字, 非資料): 連線類與查詢類, 使safe摘要的errType保有SequelizeConnectionError等類別名, 其餘一律Error;
+//wsemi之getDiagBriefErr取原型鏈首個name字串資料屬性(sequelize於建構時設this.name='Sequelize…'), 故宣告name值而非建構子名稱
+const ERR_TYPES = ['SequelizeConnectionError', 'SequelizeAccessDeniedError', 'SequelizeConnectionAcquireTimeoutError', 'SequelizeConnectionRefusedError', 'SequelizeConnectionTimedOutError', 'SequelizeHostNotFoundError', 'SequelizeHostNotReachableError', 'SequelizeInvalidConnectionError', 'SequelizeDatabaseError', 'SequelizeTimeoutError', 'SequelizeQueryError', 'SequelizeBaseError']
+
+//代碼集合: sqlite、mysql與mariadb、mssql、postgres(SQLSTATE)各方言之機器代碼; sequelize包裝驅動程式之錯誤, 代碼在original與parent
+const ERR_CODES = ['sqlite', 'mysql', 'mssql', 'sqlstate']
+const ERR_NESTED = ['original', 'parent']
+
+//safe摘要會用到之鍵(errType與errCode由wsemi恆含)
+const SAFE_KEYS = ['stmt']
+
+
+function getStoragePaths(dialect, storage, database) {
+    //sqlite之資料庫檔案路徑(儲存路徑, 診斷輸出之細節須遮罩): storage未給時sqlite以database為檔案; 取原樣、正規化與絕對路徑, 其餘方言無檔案路徑
+    if (dialect !== 'sqlite') {
+        return []
+    }
+    let p = typeof storage === 'string' && storage !== '' ? storage : database
+    if (typeof p !== 'string' || p === '') {
+        return []
+    }
+    return [p, path.normalize(p), path.resolve(p)]
+}
 
 
 /**
  * 由指定資料庫生成各表的models資料
  *
- * 診斷輸出(sql紀錄與錯誤)皆經單一出口：預設只輸出固定標籤與不含個資之摘要(不含sql全文、資料值、錯誤原文、路徑)，sql紀錄預設關閉；資料庫帳號與密碼於任何輸出(含opt.logDetail與opt.funLog之細節)皆以***遮罩
+ * 診斷輸出(sql紀錄與錯誤)皆經wsemi之getDiag單一出口：預設只輸出固定標籤與不含個資之摘要(不含sql全文、資料值、錯誤原文、路徑)，sql紀錄預設關閉；資料庫帳號、密碼與sqlite檔案路徑於opt.logDetail與opt.funLog之細節皆以***遮罩；reject與同步拋出之後端錯誤，其中的憑證(密碼、帳號:密碼、連線字串帳密)亦以***遮罩(單獨帳號與儲存路徑不遮)
  *
  * @class
  * @param {Object} [opt={}] 輸入設定物件，預設{}
@@ -21,9 +51,9 @@ import { getOptLog, getSecrets, getDiag, getBriefErr, getSqlStmt } from './getDi
  * @param {Integer} [opt.port=null] 輸入連線主機port整數，預設null
  * @param {String} [opt.storage=''] 輸入sqlite檔案位置字串，預設''
  * @param {Boolean} [opt.logging=false] 輸入是否紀錄sequelize實際執行的sql指令布林值，預設false，型別錯誤者視同false。為true時預設只輸出敘述種類(如console.log('sql', { stmt: 'SELECT' }))，不輸出sql全文；需搭配opt.logDetail或opt.funLog才取得sql全文(含表名)
- * @param {Boolean} [opt.logDetail=false] 輸入是否還原診斷輸出之舊版細節布林值，預設false，型別錯誤者視同false。診斷輸出(console)預設只含固定標籤與不含個資之摘要(不含sql全文、錯誤原文、路徑)；為true時還原舊版輸出(sql全文以console.log，建表或外鍵查詢失敗之錯誤物件以console.error)，有洩漏個資之風險，僅供除錯使用。帳號與密碼於任何情形皆以***遮罩
- * @param {Function} [opt.funLog=null] 輸入診斷輸出函數(label, safe, detail)，預設null，非函數者視同null。給予時診斷輸出只交給此函數(不寫console)：label為固定標籤('sql'、'foreign keys catch'、'tables catch')，safe為不含個資之摘要物件(如{ stmt: 'SELECT' }、{ errType: 'ConnectionError', errCode: 'SQLITE_CANTOPEN' })，detail為完整細節(sql全文字串、錯誤物件之副本；帳號與密碼已遮罩為***)。此函數拋錯或回傳reject之promise皆不影響產生models之流程
- * @returns {Promise} 回傳Promise，resolve回傳產生的models資料，reject回傳錯誤訊息
+ * @param {Boolean} [opt.logDetail=false] 輸入是否於console輸出遮罩後之細節布林值，預設false，型別錯誤者視同false。診斷輸出(console)預設只含固定標籤與不含個資之摘要(不含sql全文、錯誤原文、路徑)；為true時console輸出(label, 細節)：sql全文以console.log('sql', sql全文)，建表或外鍵查詢失敗之錯誤物件副本以console.error(label, 錯誤)，有洩漏個資之風險，僅供除錯使用。帳號、密碼與sqlite檔案路徑於任何情形皆以***遮罩
+ * @param {Function} [opt.funLog=null] 輸入診斷輸出函數(label, safe, detail)，預設null，非函數者視同null。給予時診斷輸出只交給此函數(不寫console)：label為固定標籤('sql'、'foreign keys catch'、'tables catch')，safe為不含個資之摘要物件(如{ stmt: 'SELECT' }、{ errType: 'SequelizeConnectionError', errCode: 'SQLITE_CANTOPEN' })，detail為完整細節(sql全文字串、錯誤物件之副本；帳號、密碼與sqlite檔案路徑已遮罩為***)。此函數拋錯或回傳reject之promise皆不影響產生models之流程。遮罩規則與選項語意同wsemi之getDiag
+ * @returns {Promise} 回傳Promise，resolve回傳產生的models資料，reject回傳錯誤訊息(本套件自身之檢查訊息如need database為固定字串；後端錯誤值中的憑證已遮罩，無憑證者為原物件)
  */
 function WAutoSequelize(opt = {}) {
     let pm = genPm()
@@ -71,32 +101,50 @@ function WAutoSequelize(opt = {}) {
         return pm
     }
 
-    //diag, 診斷輸出之單一出口(R1): src內所有console輸出與傳給sequelize之sql紀錄函數皆經此, 除getDiag.mjs外不得直接呼叫console;
-    //預設只輸出固定標籤與不含個資之摘要, opt.logDetail還原舊版細節, opt.funLog取代console; 帳號與密碼於任何輸出皆遮罩;
-    //其後各路徑共用此快照, 不再讀取使用端的opt
-    let optLog = getOptLog(opt)
-    let diag = getDiag(optLog, getSecrets(username, password))
+    //diag, 診斷輸出之單一出口(R1): src內所有console輸出與傳給sequelize之sql紀錄函數皆經此(wsemi之getDiag), src不得直接呼叫console;
+    //預設只輸出固定標籤與不含個資之摘要, opt.logDetail輸出遮罩後細節, opt.funLog取代console; 帳號、密碼與sqlite檔案路徑於診斷輸出皆遮罩;
+    //getDiag於此取快照(opt.logDetail與opt.funLog), 其後各路徑共用, 不再讀取使用端的opt
+    let diag = getDiag(opt, {
+        secrets: getDiagSecrets({ username, password, paths: getStoragePaths(dialect, storage, database) }),
+        codes: ERR_CODES,
+        types: ERR_TYPES,
+        nested: ERR_NESTED,
+        safeKeys: SAFE_KEYS,
+    })
 
-    //logging, 傳給sequelize之logging函數: 未開啟時為false(sequelize不再以預設logger console.log輸出); 開啟時sequelize以(sql全文, 計時)呼叫, 只取第一個引數;
-    //預設只輸出敘述種類, sql全文為細節; 為函數故亦無logging:true之棄用警告
+    //logging, 須為true才生效(型別錯誤、讀取拋錯者視同false): 傳給sequelize之logging函數, 未開啟時為false(sequelize不再以預設logger console.log輸出);
+    //開啟時sequelize以(sql全文, 計時)呼叫, 只取第一個引數; 預設只輸出敘述種類, sql全文為細節; 為函數故亦無logging:true之棄用警告
+    let logging = false
+    try {
+        logging = opt.logging === true
+    }
+    catch (err) {
+        //忽略
+    }
     let logSql = (sql) => {
-        diag('sql', { stmt: getSqlStmt(sql) }, () => sql, true)
+        diag('sql', { stmt: getSqlStmt(sql) }, () => sql)
     }
-    options.logging = optLog.logging ? logSql : false
+    options.logging = logging ? logSql : false
 
-    //logErr, 舊版以console.error(err)輸出之站點(建表清單與外鍵查詢失敗, 其後仍照常產生models, 故不影響resolve/reject)改經此:
-    //預設只輸出標籤與{ errType, errCode }(仍走console.error), 錯誤物件為細節
+    //logErr, 舊版以console.error(err)輸出之站點(建表清單與外鍵查詢失敗, 其後仍照常產生models, 故不影響resolve/reject):
+    //預設只輸出標籤與{ errType, errCode }(走console.error), 錯誤物件為細節
     let logErr = (label, err) => {
-        diag(label, getBriefErr(err), () => err, true, 'error')
+        diag(label, diag.brief(err), () => err, 'error')
     }
 
-    //auto
-    let auto = new AutoSequelize(database, username, password, options, logErr)
+    //auto, 缺少資料庫驅動等情形由sequelize同步拋出(後端之外來值), 經diag.err
+    let auto = null
+    try {
+        auto = new AutoSequelize(database, username, password, options, logErr)
+    }
+    catch (err) {
+        throw diag.err(err)
+    }
 
-    //run
+    //run, err為寫檔等後端之外來值(如fs錯誤訊息含路徑, 路徑中的表名可含密碼), 經diag.err; 上方need xxx之reject為本套件固定字串, 不經遮罩
     auto.run(function (err) {
         if (err) {
-            pm.reject(err)
+            pm.reject(diag.err(err))
         }
         else {
             pm.resolve({

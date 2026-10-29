@@ -2,7 +2,21 @@
 
 本檔為執行工作時特有之累積經驗,留給後續之嘗試、執行與判斷,由agent自行編列、擴充與維護.過長時抽出舊者為`experience_<年月日>.md`,並於本檔註明何時抽出.
 
+## mig-autoseq(2026-10-29):遷移至wsemi共用診斷模組(第161項)
+
+- **wsemi以`name`判類別名,不是建構子名**:`getDiagBriefErr`取「原型鏈首個`name`字串資料屬性,非`Error`即取之」,sequelize於建構時設`this.name = 'SequelizeConnectionError'`,所以`types`要宣告`Sequelize…Error`這批`name`值(grep `node_modules/sequelize/lib/errors`的`this.name =`),宣告`ConnectionError`(建構子名)不生效;不宣告則`errType`全退為`Error`(失去既有摘要).`errType`值由`ConnectionError`變`SequelizeConnectionError`列入Breaking changes.
+- **`codes`要涵蓋方言**:設計表只列`sqlite/mysql/sqlstate`,但既有測試與摘要用`ELOGIN`(mssql,本套件支援該方言),不宣告`mssql`則`errCode`消失;`mssql`集合另明列整數(18456等),未明列整數不收.
+- **真實外來值洩漏路徑不需mock**:表名含密碼時,`fs.writeFile`的模型檔路徑含密碼;把`<directory>/<表名>.js`先建成資料夾,寫檔即真實`EISDIR`錯誤,訊息與`err.path`皆含密碼——修前`pm.reject(err)`原樣交出.這比patch`fs.writeFile`更能證明站點接上;patch版(`withWriteFileFail`)用來送入語料的任意形態值.
+- **sqlite路徑變體要用相對路徑才分得出**:`database`給絕對路徑時原樣/正規化/絕對三種相同,漏掉任一種的變異存活;須另給相對路徑(`./test/_tmp/…`),且讓錯誤訊息同時帶三種形式.
+- **語料wire案的接線法**:`make(ctx)`產生之值當「後端拋出之值」送入真實站點(patch `QueryInterface.showAllTables`→`tables catch`站取funLog之detail;patch `fs.writeFile`→`pm.reject`站取reject值),再以語料的`verify(c, out, ctx)`判定;`check`吃的`out`形狀依`call`而定(R01為`[原值, 結果]`、R11/R12為`{ p, e, r, c }`),須依案轉接.另加「wire案皆已分類」測試,使wsemi日後新增wire案時此處失敗而須分類.
+- **舊版對照取法**:`git archive HEAD src test package.json | tar -x -C ./tmp/<案名>/pre`取修前副本,把新測試複製進去,以repo根為cwd執行`node ./node_modules/mocha/bin/mocha.js <pre內測試路徑>`(副本在repo的`tmp/`下,模組解析會往上找到repo的`node_modules`);quiet-run的鎖以cwd目錄名識別套件,故cwd不要換成副本夾.
+- **變異腳本與換行**:工作樹為CRLF(`.editorconfig` `end_of_line = crlf`、git autocrlf),含`\n`的多行比對須先轉LF,否則回報NOAPPLY(此次M02、M19即因此第一輪未套用);腳本對每個變異都檢查「old字串恰出現1次」,未套用不計存活.
+- **測試鎖排隊久**:`--lock`常等2分鐘以上(他套件持鎖);基準與變異包成同一個腳本一次取鎖,避免兩次排隊.
+- **npm會重排`package.json`相依**:`npm i wsemi@latest`把相依改為字母序並補結尾換行,收尾時手動還原原順序與無結尾換行,使diff只剩`wsemi`一行.
+
 ## autoseq-run01(2026-10-28):診斷輸出單一出口(第156項,第153項之延伸)
+
+(2026-10-29起`src/getDiag.mjs`已刪、遮罩改由wsemi提供;下列涉及自寫遮罩/副本函式之條目〔`mkErrCopy`、`getForms`、外審檢查表等〕僅供歷史參考,其教訓已併入wsemi之共用語料.)
 
 - **建表清單失敗不會reject**:`auto-sequelize.js`的`build`→`generateText(err)`只把錯誤`console.error`出來,其後照常產生(空的)models並以空結果完成;連不上資料庫、帳密錯誤、sqlite檔打不開,`WAutoSequelize`都resolve `{ tables: {}, foreignKeys: {} }`.這是修前行為,任務書要求回傳契約不變,故保留;診斷輸出因此成為使用者知道失敗的**唯一**管道,預設不能完全靜默,須至少留下標籤與`{ errType, errCode }`摘要.已列待裁示(是否改為reject).
 - **真實驅動錯誤的觸發法(不需docker)**:把`database`(sqlite的storage)指向一個**既有資料夾**,sequelize的sqlite連線管理器拋`ConnectionError`(`SQLITE_CANTOPEN`),可實測失敗路徑;指向不存在的父目錄不會失敗(sequelize會自動建立父目錄).要驗證錯誤文字夾帶帳密的遮罩,暫時覆寫`QueryInterface`原型上的`showAllTables`(sqlite為`Object.getPrototypeOf(new Sequelize({dialect:'sqlite',storage:':memory:'}).getQueryInterface())`),或覆寫`Sequelize.prototype.query`並以`/foreign_key_list\(\w+\);/`比對(`mapForeignKeys`之查詢帶`;`且表名無反引號,`describeTable`內的同名查詢帶反引號,不受影響).

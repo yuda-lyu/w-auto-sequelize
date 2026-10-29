@@ -6,13 +6,14 @@ import { createRequire } from 'module'
 import Sequelize from 'sequelize'
 import was from '../src/WAutoSequelize.mjs'
 import AutoSequelize from '../src/auto-sequelize.js'
-import { mkDb, capture, settle } from './tools/diagFixture.mjs'
+import { mkDb, capture, settle, patch, PW, USER, mkSecretErr, withShowAllTablesFail } from './tools/diagFixture.mjs'
 
 
+//接線測試(診斷輸出與遮罩由wsemi之getDiag提供, 形態類案與reject/throw之站點見api-diaglog-wire): 確認本套件之各站點已接上、串流與回傳契約正確
 //rulebook R1~R7: 診斷輸出(console)與SQL紀錄(opt.logging)之預設安全與可控, 以sqlite實跑WAutoSequelize
 //  R1 sequelize實例一律明給logging(未給即false), 不得落回預設logger(console.log)
 //  R2 預設只輸出標籤與不含個資之摘要(不含SQL、表名、錯誤原文、帳密、路徑); 成功路徑預設無任何console輸出
-//  R3 opt.logging為true時每條sql交給診斷輸出, 預設只輸出敘述種類; opt.logDetail為true還原舊版輸出(sql全文以console.log、錯誤以console.error), 帳號與密碼仍遮罩
+//  R3 opt.logging為true時每條sql交給診斷輸出, 預設只輸出敘述種類; opt.logDetail為true時console輸出(label, 遮罩後細節)(sql全文以console.log、錯誤副本以console.error), 帳號與密碼仍遮罩
 //  R4 opt.funLog(label, safe, detail)取代console; 型別錯誤之選項忽略並用預設
 //  R5 診斷輸出不得影響resolve/reject內容與時機
 //  R7 回傳契約不變: resolve值、模型檔內容、reject訊息、同步拋錯、建表失敗仍resolve空結果
@@ -22,8 +23,6 @@ let golden = JSON.parse(fs.readFileSync(new URL('./tools/golden-contract.json', 
 let require = createRequire(import.meta.url)
 
 let dir = path.resolve('./test/_tmp/api-diaglog')
-let PW = 'S3cretPw'
-let USER = 'tuser'
 let storage = ''
 let nModels = 0
 
@@ -54,45 +53,6 @@ function readModels(d) {
 function stmtOf(line) {
     //舊輸出行(log: Executing (default): SELECT ...)的敘述種類
     return line.replace(/^log: Executing \([^)]*\): /, '').match(/^[A-Za-z]+/)[0].toUpperCase()
-}
-
-
-//patch, 暫時覆寫物件上的方法, 回傳還原函數
-function patch(obj, name, fn) {
-    let had = Object.prototype.hasOwnProperty.call(obj, name)
-    let old = obj[name]
-    obj[name] = fn
-    return () => {
-        if (had) {
-            obj[name] = old
-        }
-        else {
-            delete obj[name]
-        }
-    }
-}
-
-
-function mkSecretErr() {
-    let e = new Error(`Login failed for user '${USER}' pw ${PW} url mssql://${USER}:${PW}@db.local:1433`)
-    e.code = 'ELOGIN'
-    e.sql = `SELECT '${PW}'`
-    e[`key_${PW}`] = 2
-    e[Symbol(`sym_${PW}`)] = 3
-    return e
-}
-
-
-async function withShowAllTablesFail(fn, mkErr = mkSecretErr) {
-    //使showAllTables(建表清單)失敗: 預設錯誤文字夾帶帳密
-    let qi = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false }).getQueryInterface()
-    let restore = patch(Object.getPrototypeOf(qi), 'showAllTables', () => Promise.reject(mkErr()))
-    try {
-        return await fn()
-    }
-    finally {
-        restore()
-    }
 }
 
 
@@ -336,10 +296,10 @@ describe('api-diaglog', function() {
             assert.deepStrictEqual(seen.filter((x) => /SEQUELIZE|logging/i.test(x)), [])
         })
 
-        it('R3 logging:true加logDetail:true: 還原舊版輸出(每條sql全文以單一字串引數交給console.log, 與修前逐行相同)', async function() {
-            let { calls, lines } = await capture(() => was(getOpt({ logging: true, logDetail: true })))
-            assert.ok(calls.every((c) => c.m === 'log' && c.args.length === 1 && typeof c.args[0] === 'string'))
-            assert.deepStrictEqual([...lines].sort(), [...golden.oldLines].sort())
+        it('R3 logging:true加logDetail:true: 每條sql全文交給console.log(\'sql\', sql全文), sql全文與修前逐條相同', async function() {
+            let { calls } = await capture(() => was(getOpt({ logging: true, logDetail: true })))
+            assert.ok(calls.every((c) => c.m === 'log' && c.args.length === 2 && c.args[0] === 'sql' && typeof c.args[1] === 'string'))
+            assert.deepStrictEqual(calls.map((c) => `log: ${c.args[1]}`).sort(), [...golden.oldLines].sort())
         })
 
         it('R3 logDetail:true單獨(logging未開)不輸出sql: logging才決定是否紀錄sql', async function() {
@@ -460,28 +420,29 @@ describe('api-diaglog', function() {
             let { res, calls, lines, isErr } = await capture(() => was(getOpt({ database: bad })))
             assert.strictEqual(isErr, false)
             assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
-            assert.deepStrictEqual(calls, [{ m: 'error', args: ['tables catch', { errType: 'ConnectionError', errCode: 'SQLITE_CANTOPEN' }] }])
+            assert.deepStrictEqual(calls, [{ m: 'error', args: ['tables catch', { errType: 'SequelizeConnectionError', errCode: 'SQLITE_CANTOPEN' }] }])
             let s = lines.join('\n')
             for (let x of ['unable to open', 'at Database', 'connection-manager', 'original', 'parent']) {
                 assert.ok(!s.includes(x), `輸出含 ${x}`)
             }
         })
 
-        it('R3 sqlite無法開檔: logDetail:true還原舊輸出(單一Error引數交給console.error, 含原始訊息與original/parent)', async function() {
+        it('R3 sqlite無法開檔: logDetail:true輸出console.error(\'tables catch\', 錯誤副本), 含原始訊息與original/parent', async function() {
             let bad = path.join(dir, 'isadir')
             fs.mkdirSync(bad, { recursive: true })
             let { res, calls } = await capture(() => was(getOpt({ database: bad, logDetail: true })))
             assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
             assert.strictEqual(calls.length, 1)
             assert.strictEqual(calls[0].m, 'error')
-            assert.strictEqual(calls[0].args.length, 1)
-            let e = calls[0].args[0]
+            assert.strictEqual(calls[0].args.length, 2)
+            assert.strictEqual(calls[0].args[0], 'tables catch')
+            let e = calls[0].args[1]
             assert.ok(e instanceof Error)
             assert.ok(e.message.includes('SQLITE_CANTOPEN: unable to open database file'), e.message)
             assert.strictEqual(e.original.code, 'SQLITE_CANTOPEN')
             assert.strictEqual(e.parent.code, 'SQLITE_CANTOPEN')
 
-            //與舊版(console.error(原錯誤物件))經格式化後逐字相同: 以sequelize重現同一錯誤作對照
+            //副本經格式化後顯示類別名與原始訊息、original/parent之代碼
             let orig
             try {
                 await new Sequelize({ dialect: 'sqlite', storage: bad, logging: false }).getQueryInterface().showAllTables()
@@ -489,7 +450,9 @@ describe('api-diaglog', function() {
             catch (err) {
                 orig = err
             }
-            assert.strictEqual(util.format(e), util.format(orig))
+            assert.ok(orig !== e && orig instanceof Error, '副本非原物件')
+            let f = util.format(e)
+            assert.ok(f.includes('SequelizeConnectionError') && f.includes('SQLITE_CANTOPEN: unable to open database file') && f.includes('original') && f.includes('parent'), f)
         })
 
         it('R4 失敗路徑上選項型別錯誤(logDetail非true、funLog非函數)亦忽略並用預設: 只輸出標籤與摘要', async function() {
@@ -498,7 +461,7 @@ describe('api-diaglog', function() {
             for (let v of ['true', 1, {}, 'yes']) {
                 let { res, calls } = await capture(() => was(getOpt({ database: bad, logDetail: v, funLog: v })))
                 assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} }, String(v))
-                assert.deepStrictEqual(calls, [{ m: 'error', args: ['tables catch', { errType: 'ConnectionError', errCode: 'SQLITE_CANTOPEN' }] }], String(v))
+                assert.deepStrictEqual(calls, [{ m: 'error', args: ['tables catch', { errType: 'SequelizeConnectionError', errCode: 'SQLITE_CANTOPEN' }] }], String(v))
             }
         })
 
@@ -530,7 +493,7 @@ describe('api-diaglog', function() {
             assert.deepStrictEqual(lines, [])
             assert.strictEqual(got.length, 1)
             assert.strictEqual(got[0][0], 'tables catch')
-            assert.deepStrictEqual(got[0][1], { errType: 'ConnectionError', errCode: 'SQLITE_CANTOPEN' })
+            assert.deepStrictEqual(got[0][1], { errType: 'SequelizeConnectionError', errCode: 'SQLITE_CANTOPEN' })
             assert.ok(got[0][2] instanceof Error)
             assert.ok(got[0][2].message.includes('SQLITE_CANTOPEN'))
         })
@@ -542,12 +505,13 @@ describe('api-diaglog', function() {
             assertNoLeak(lines, ['Login failed', 'db.local'])
         })
 
-        it('R3 R6 錯誤文字夾帶帳密: logDetail:true還原細節(含訊息、屬性、鍵), 帳號與密碼(含屬性值、屬性鍵、Symbol描述、連線字串)皆以***遮罩', async function() {
+        it('R3 R6 錯誤文字夾帶帳密: logDetail:true輸出細節(含訊息、屬性、鍵), 帳號與密碼(含屬性值、屬性鍵、Symbol描述、連線字串)皆以***遮罩', async function() {
             let { calls, lines } = await withShowAllTablesFail(() => capture(() => was(getOpt({ logDetail: true }))))
             assert.strictEqual(calls.length, 1)
             assert.strictEqual(calls[0].m, 'error')
-            assert.strictEqual(calls[0].args.length, 1)
-            let e = calls[0].args[0]
+            assert.strictEqual(calls[0].args.length, 2)
+            assert.strictEqual(calls[0].args[0], 'tables catch')
+            let e = calls[0].args[1]
             assert.ok(e instanceof Error)
             assert.strictEqual(e.message, 'Login failed for user \'***\' pw *** url mssql://***@db.local:1433')
             assert.strictEqual(e.code, 'ELOGIN')
@@ -584,12 +548,13 @@ describe('api-diaglog', function() {
             assertNoLeak(lines, ['Login failed', 'db.local'])
         })
 
-        it('R3 R6 logDetail:true: 還原console.error(Error), 帳密遮罩', async function() {
+        it('R3 R6 logDetail:true: console.error(\'foreign keys catch\', Error副本), 帳密遮罩', async function() {
             let { calls, lines } = await withForeignKeysFail(() => capture(() => was(getOpt({ logDetail: true }))))
             assert.strictEqual(calls.length, 1)
             assert.strictEqual(calls[0].m, 'error')
-            assert.ok(calls[0].args[0] instanceof Error)
-            assert.ok(calls[0].args[0].message.startsWith('Login failed for user \'***\''))
+            assert.strictEqual(calls[0].args[0], 'foreign keys catch')
+            assert.ok(calls[0].args[1] instanceof Error)
+            assert.ok(calls[0].args[1].message.startsWith('Login failed for user \'***\''))
             assertNoLeak(lines, ['sym_S3', 'key_S3'])
         })
 
@@ -618,14 +583,15 @@ describe('api-diaglog', function() {
             assertNoLeak(lines, ['Login failed', 'Executing'])
         })
 
-        it('R3 logging:true加logDetail:true + 外鍵查詢失敗: sql全文以單一字串走console.log, 錯誤以單一Error走console.error(帳密遮罩)', async function() {
+        it('R3 logging:true加logDetail:true + 外鍵查詢失敗: sql全文走console.log(\'sql\', 全文), 錯誤走console.error(label, Error副本)(帳密遮罩)', async function() {
             let { calls, lines } = await withForeignKeysFail(() => capture(() => was(getOpt({ logging: true, logDetail: true }))))
             let logs = calls.filter((c) => c.m === 'log')
             let errs = calls.filter((c) => c.m === 'error')
-            assert.ok(logs.length > 0 && logs.every((c) => c.args.length === 1 && typeof c.args[0] === 'string' && c.args[0].startsWith('Executing (')))
+            assert.ok(logs.length > 0 && logs.every((c) => c.args.length === 2 && c.args[0] === 'sql' && typeof c.args[1] === 'string' && c.args[1].startsWith('Executing (')))
             assert.strictEqual(errs.length, 1)
-            assert.strictEqual(errs[0].args.length, 1)
-            assert.ok(errs[0].args[0] instanceof Error)
+            assert.strictEqual(errs[0].args.length, 2)
+            assert.strictEqual(errs[0].args[0], 'foreign keys catch')
+            assert.ok(errs[0].args[1] instanceof Error)
             assertNoLeak(lines, ['sym_S3', 'key_S3'])
         })
 
@@ -651,7 +617,7 @@ describe('api-diaglog', function() {
             assertNoLeak(lines, ['Login failed', 'db.local'])
         })
 
-        it('R2 R3 R4 describeTable失敗(部分表已成功): 預設只輸出tables catch摘要; logDetail還原單一Error(遮罩); funLog收摘要與遮罩副本', async function() {
+        it('R2 R3 R4 describeTable失敗(部分表已成功): 預設只輸出tables catch摘要; logDetail輸出(label, Error副本)(遮罩); funLog收摘要與遮罩副本', async function() {
             let r1 = await withDescribeFail(() => capture(() => was(getOpt())))
             assert.strictEqual(r1.isErr, false)
             assert.deepStrictEqual(r1.calls, [{ m: 'error', args: ['tables catch', { errType: 'Error', errCode: 'ELOGIN' }] }])
@@ -660,8 +626,9 @@ describe('api-diaglog', function() {
             let r2 = await withDescribeFail(() => capture(() => was(getOpt({ logDetail: true }))))
             assert.strictEqual(r2.calls.length, 1)
             assert.strictEqual(r2.calls[0].m, 'error')
-            assert.ok(r2.calls[0].args[0] instanceof Error)
-            assert.ok(r2.calls[0].args[0].message.startsWith('Login failed for user \'***\''))
+            assert.strictEqual(r2.calls[0].args[0], 'tables catch')
+            assert.ok(r2.calls[0].args[1] instanceof Error)
+            assert.ok(r2.calls[0].args[1].message.startsWith('Login failed for user \'***\''))
             assertNoLeak(r2.lines, ['sym_S3', 'key_S3'])
 
             let got = []
@@ -725,7 +692,7 @@ describe('api-diaglog', function() {
             let { lines, res } = await capture(() => was(getOpt({ database: storagePw, logging: true, logDetail: true })))
             assertNoLeak(lines)
             assert.ok(lines.some((l) => l.includes('t_***')), lines.join('\n').slice(0, 400))
-            assert.ok(lines.some((l) => l.startsWith('log: Executing (default): PRAGMA TABLE_INFO(')))
+            assert.ok(lines.some((l) => l.startsWith('log: sql Executing (default): PRAGMA TABLE_INFO(')))
             assert.deepStrictEqual(Object.keys(res.tables), [TAB])
         })
 
@@ -751,8 +718,8 @@ describe('api-diaglog', function() {
                 return e
             })
             assert.strictEqual(calls.length, 1)
-            assert.strictEqual(calls[0].args[0].message, 'pw is *** here')
-            assert.strictEqual(calls[0].args[0].pw, '***')
+            assert.strictEqual(calls[0].args[1].message, 'pw is *** here')
+            assert.strictEqual(calls[0].args[1].pw, '***')
             assert.ok(!lines.join('\n').includes('98765432'))
         })
 

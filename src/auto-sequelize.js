@@ -18,7 +18,7 @@ function AutoSequelize(database, username, password, options, logErr) {
         options.storage = database
     }
 
-    //logErr(label, err)為診斷輸出, 由WAutoSequelize提供(見getDiag.mjs, 本檔不直接呼叫console); 未給者不輸出
+    //logErr(label, err)為診斷輸出, 由WAutoSequelize提供(經wsemi之getDiag, 本檔不直接呼叫console); 未給者不輸出
     this.logErr = typeof logErr === 'function' ? logErr : function() {}
 
     if (database instanceof Sequelize) {
