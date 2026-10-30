@@ -6,7 +6,7 @@ import { createRequire } from 'module'
 import Sequelize from 'sequelize'
 import was from '../src/WAutoSequelize.mjs'
 import AutoSequelize from '../src/auto-sequelize.js'
-import { mkDb, capture, settle, patch, PW, USER, mkSecretErr, withShowAllTablesFail } from './tools/diagFixture.mjs'
+import { mkDb, capture, settle, PW, USER, mkSecretErr, withShowAllTablesFail, withDescribeFail, withForeignKeysFail } from './tools/diagFixture.mjs'
 
 
 //接線測試(診斷輸出與遮罩由wsemi之getDiag提供, 形態類案與reject/throw之站點見api-diaglog-wire): 確認本套件之各站點已接上、串流與回傳契約正確
@@ -16,7 +16,7 @@ import { mkDb, capture, settle, patch, PW, USER, mkSecretErr, withShowAllTablesF
 //  R3 opt.logging為true時每條sql交給診斷輸出, 預設只輸出敘述種類; opt.logDetail為true時console輸出(label, 遮罩後細節)(sql全文以console.log、錯誤副本以console.error), 帳號與密碼仍遮罩
 //  R4 opt.funLog(label, safe, detail)取代console; 型別錯誤之選項忽略並用預設
 //  R5 診斷輸出不得影響resolve/reject內容與時機
-//  R7 回傳契約不變: resolve值、模型檔內容、reject訊息、同步拋錯、建表失敗仍resolve空結果
+//  R7 回傳契約不變: 成功時之resolve值、模型檔內容、固定詞彙reject訊息、缺驅動之同步拋錯(建表清單、描述表與外鍵查詢失敗自R10起reject, 見api-reject)
 
 
 let golden = JSON.parse(fs.readFileSync(new URL('./tools/golden-contract.json', import.meta.url), 'utf8'))
@@ -56,45 +56,7 @@ function stmtOf(line) {
 }
 
 
-async function withForeignKeysFail(fn) {
-    //使mapForeignKeys之PRAGMA foreign_key_list(表名);查詢失敗(describeTable內之同名查詢帶反引號,不受影響): 錯誤文字夾帶帳密
-    let orig = Sequelize.prototype.query
-    let restore = patch(Sequelize.prototype, 'query', function(sql, ...a) {
-        if (typeof sql === 'string' && /foreign_key_list\(\w+\);/.test(sql)) {
-            return Promise.reject(mkSecretErr())
-        }
-        return orig.call(this, sql, ...a)
-    })
-    try {
-        return await fn()
-    }
-    finally {
-        restore()
-    }
-}
-
-
-async function withDescribeFail(fn, table = 'users') {
-    //使指定表的describeTable失敗(其餘表照常): 錯誤文字夾帶帳密
-    let qi = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false }).getQueryInterface()
-    let proto = Object.getPrototypeOf(qi)
-    let orig = qi.describeTable
-    let restore = patch(proto, 'describeTable', function(t, ...a) {
-        if (t === table) {
-            return Promise.reject(mkSecretErr())
-        }
-        return orig.call(this, t, ...a)
-    })
-    try {
-        return await fn()
-    }
-    finally {
-        restore()
-    }
-}
-
-
-//survive, 在指定失敗路徑下, funLog拋錯、回傳reject之promise、console.error拋錯皆不影響resolve值, 也不產生unhandledRejection
+//survive, 在指定失敗路徑下, funLog拋錯、回傳reject之promise、console.error拋錯皆不影響了結結果(失敗路徑為reject), 也不產生unhandledRejection; 回傳各次之{ isErr, v }(v為resolve值或reject值)
 async function survive(withFail, optEx = {}) {
     let seen = []
     let onRej = (e) => seen.push(e)
@@ -116,7 +78,7 @@ async function survive(withFail, optEx = {}) {
                 })
             }
             try {
-                results.push(await withFail(() => was(getOpt(ex))))
+                results.push(await withFail(() => was(getOpt(ex)).then((v) => ({ isErr: false, v }), (v) => ({ isErr: true, v }))))
             }
             finally {
                 ks.forEach((k, i) => {
@@ -412,14 +374,14 @@ describe('api-diaglog', function() {
 
     })
 
-    describe('R2 R3 R4 R7 建表失敗(showAllTables): 修前以console.error輸出整個錯誤物件, 仍resolve空結果', function() {
+    describe('R2 R3 R4 R10 建表失敗(showAllTables): 修前以console.error輸出整個錯誤物件(其後以空結果resolve), 現輸出標籤與摘要並reject', function() {
 
-        it('R2 R7 sqlite無法開檔(storage為資料夾, 真實驅動錯誤): 預設只輸出標籤與{ errType, errCode }(console.error), 仍resolve空結果', async function() {
+        it('R2 R10 sqlite無法開檔(storage為資料夾, 真實驅動錯誤): 預設只輸出標籤與{ errType, errCode }(console.error), 並reject該錯誤', async function() {
             let bad = path.join(dir, 'isadir')
             fs.mkdirSync(bad, { recursive: true })
-            let { res, calls, lines, isErr } = await capture(() => was(getOpt({ database: bad })))
-            assert.strictEqual(isErr, false)
-            assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
+            let { err, calls, lines, isErr } = await capture(() => was(getOpt({ database: bad })))
+            assert.strictEqual(isErr, true)
+            assert.strictEqual(err.name, 'SequelizeConnectionError')
             assert.deepStrictEqual(calls, [{ m: 'error', args: ['tables catch', { errType: 'SequelizeConnectionError', errCode: 'SQLITE_CANTOPEN' }] }])
             let s = lines.join('\n')
             for (let x of ['unable to open', 'at Database', 'connection-manager', 'original', 'parent']) {
@@ -430,8 +392,8 @@ describe('api-diaglog', function() {
         it('R3 sqlite無法開檔: logDetail:true輸出console.error(\'tables catch\', 錯誤副本), 含原始訊息與original/parent', async function() {
             let bad = path.join(dir, 'isadir')
             fs.mkdirSync(bad, { recursive: true })
-            let { res, calls } = await capture(() => was(getOpt({ database: bad, logDetail: true })))
-            assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
+            let { isErr, calls } = await capture(() => was(getOpt({ database: bad, logDetail: true })))
+            assert.strictEqual(isErr, true)
             assert.strictEqual(calls.length, 1)
             assert.strictEqual(calls[0].m, 'error')
             assert.strictEqual(calls[0].args.length, 2)
@@ -459,16 +421,16 @@ describe('api-diaglog', function() {
             let bad = path.join(dir, 'isadir')
             fs.mkdirSync(bad, { recursive: true })
             for (let v of ['true', 1, {}, 'yes']) {
-                let { res, calls } = await capture(() => was(getOpt({ database: bad, logDetail: v, funLog: v })))
-                assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} }, String(v))
+                let { isErr, calls } = await capture(() => was(getOpt({ database: bad, logDetail: v, funLog: v })))
+                assert.strictEqual(isErr, true, String(v))
                 assert.deepStrictEqual(calls, [{ m: 'error', args: ['tables catch', { errType: 'SequelizeConnectionError', errCode: 'SQLITE_CANTOPEN' }] }], String(v))
             }
         })
 
-        it('R1 R5 AutoSequelize(內部類別)未給logErr時失敗路徑不輸出也不拋錯, 照舊以空結果完成', async function() {
+        it('R1 R5 R10 AutoSequelize(內部類別)未給logErr時失敗路徑不輸出也不拋錯, 以該錯誤呼叫run之callback', async function() {
             let bad = path.join(dir, 'isadir')
             fs.mkdirSync(bad, { recursive: true })
-            let { res, lines, isErr } = await capture(() => new Promise((resolve, reject) => {
+            let { err, lines, isErr } = await capture(() => new Promise((resolve, reject) => {
                 let auto = new AutoSequelize(bad, USER, PW, { dialect: 'sqlite', directory: path.join(dir, 'models-nolog') })
                 auto.run((err) => {
                     if (err) {
@@ -479,8 +441,8 @@ describe('api-diaglog', function() {
                     }
                 })
             }))
-            assert.strictEqual(isErr, false)
-            assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
+            assert.strictEqual(isErr, true)
+            assert.strictEqual(err.name, 'SequelizeConnectionError')
             assert.deepStrictEqual(lines, [])
         })
 
@@ -488,8 +450,8 @@ describe('api-diaglog', function() {
             let bad = path.join(dir, 'isadir')
             fs.mkdirSync(bad, { recursive: true })
             let got = []
-            let { res, lines } = await capture(() => was(getOpt({ database: bad, funLog: (...a) => got.push(a) })))
-            assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
+            let { isErr, lines } = await capture(() => was(getOpt({ database: bad, funLog: (...a) => got.push(a) })))
+            assert.strictEqual(isErr, true)
             assert.deepStrictEqual(lines, [])
             assert.strictEqual(got.length, 1)
             assert.strictEqual(got[0][0], 'tables catch')
@@ -499,8 +461,8 @@ describe('api-diaglog', function() {
         })
 
         it('R2 R6 錯誤文字夾帶帳密: 預設輸出不含密碼、帳號、錯誤原文', async function() {
-            let { res, calls, lines } = await withShowAllTablesFail(() => capture(() => was(getOpt())))
-            assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
+            let { isErr, calls, lines } = await withShowAllTablesFail(() => capture(() => was(getOpt())))
+            assert.strictEqual(isErr, true)
             assert.deepStrictEqual(calls, [{ m: 'error', args: ['tables catch', { errType: 'Error', errCode: 'ELOGIN' }] }])
             assertNoLeak(lines, ['Login failed', 'db.local'])
         })
@@ -524,11 +486,11 @@ describe('api-diaglog', function() {
         it('R4 R6 錯誤文字夾帶帳密: funLog之detail同樣遮罩, 且不改動sequelize拋出之原錯誤物件', async function() {
             let got = []
             let origErr = null
-            let { res, lines } = await withShowAllTablesFail(() => capture(() => was(getOpt({ funLog: (...a) => got.push(a) }))), () => {
+            let { isErr, lines } = await withShowAllTablesFail(() => capture(() => was(getOpt({ funLog: (...a) => got.push(a) }))), () => {
                 origErr = mkSecretErr()
                 return origErr
             })
-            assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
+            assert.strictEqual(isErr, true)
             assert.deepStrictEqual(lines, [])
             assert.strictEqual(got.length, 1)
             assert.deepStrictEqual(got[0][1], { errType: 'Error', errCode: 'ELOGIN' })
@@ -538,12 +500,11 @@ describe('api-diaglog', function() {
 
     })
 
-    describe('R2 R3 R4 外鍵查詢失敗(mapForeignKeys): 修前以console.error輸出錯誤, 其後照常建模', function() {
+    describe('R2 R3 R4 R10 外鍵查詢失敗(mapForeignKeys): 修前以console.error輸出錯誤(其後照常建模), 現輸出標籤與摘要並reject', function() {
 
-        it('R2 R7 預設: 標籤foreign keys catch加{ errType, errCode }, 不含帳密與原文; 表仍照常建出', async function() {
-            let { res, calls, lines, isErr } = await withForeignKeysFail(() => capture(() => was(getOpt())))
-            assert.strictEqual(isErr, false)
-            assert.deepStrictEqual(Object.keys(res.tables).sort(), ['depts', 'users'])
+        it('R2 R10 預設: 標籤foreign keys catch加{ errType, errCode }, 不含帳密與原文; reject(不再照常建模)', async function() {
+            let { calls, lines, isErr } = await withForeignKeysFail(() => capture(() => was(getOpt())))
+            assert.strictEqual(isErr, true)
             assert.deepStrictEqual(calls, [{ m: 'error', args: ['foreign keys catch', { errType: 'Error', errCode: 'ELOGIN' }] }])
             assertNoLeak(lines, ['Login failed', 'db.local'])
         })
@@ -606,20 +567,18 @@ describe('api-diaglog', function() {
             }
         })
 
-        it('R2 R7 外鍵查詢與describeTable同輪失敗(兩個錯誤站點): 依序輸出foreign keys catch、tables catch兩筆摘要, 仍resolve, 無帳密', async function() {
-            let { res, calls, lines, isErr } = await withForeignKeysFail(() => withDescribeFail(() => capture(() => was(getOpt()))))
-            assert.strictEqual(isErr, false)
-            assert.ok(res.tables !== undefined && res.foreignKeys !== undefined)
+        it('R2 R10 外鍵查詢與describeTable同輪失敗: 外鍵查詢先失敗即停, 只輸出foreign keys catch一筆摘要(不再描述表), reject, 無帳密', async function() {
+            let { calls, lines, isErr } = await withForeignKeysFail(() => withDescribeFail(() => capture(() => was(getOpt()))))
+            assert.strictEqual(isErr, true)
             assert.deepStrictEqual(calls, [
                 { m: 'error', args: ['foreign keys catch', { errType: 'Error', errCode: 'ELOGIN' }] },
-                { m: 'error', args: ['tables catch', { errType: 'Error', errCode: 'ELOGIN' }] },
             ])
             assertNoLeak(lines, ['Login failed', 'db.local'])
         })
 
-        it('R2 R3 R4 describeTable失敗(部分表已成功): 預設只輸出tables catch摘要; logDetail輸出(label, Error副本)(遮罩); funLog收摘要與遮罩副本', async function() {
+        it('R2 R3 R4 R10 describeTable失敗(部分表已成功): 預設只輸出tables catch摘要; logDetail輸出(label, Error副本)(遮罩); funLog收摘要與遮罩副本; 皆reject', async function() {
             let r1 = await withDescribeFail(() => capture(() => was(getOpt())))
-            assert.strictEqual(r1.isErr, false)
+            assert.strictEqual(r1.isErr, true)
             assert.deepStrictEqual(r1.calls, [{ m: 'error', args: ['tables catch', { errType: 'Error', errCode: 'ELOGIN' }] }])
             assertNoLeak(r1.lines, ['Login failed'])
 
@@ -643,24 +602,33 @@ describe('api-diaglog', function() {
 
     describe('R5 錯誤站點下診斷輸出異常不影響流程', function() {
 
-        it('R5 建表清單失敗(tables catch): funLog拋錯、回傳reject之promise、console.error拋錯, 皆仍resolve空結果', async function() {
+        it('R5 R10 建表清單失敗(tables catch): funLog拋錯、回傳reject之promise、console.error拋錯, 皆仍reject該後端錯誤(SQLITE_CANTOPEN)', async function() {
             let bad = path.join(dir, 'isadir')
             fs.mkdirSync(bad, { recursive: true })
             let rs = await survive((fn) => fn(), { database: bad })
             assert.strictEqual(rs.length, 3)
-            rs.forEach((r) => assert.deepStrictEqual(r, { tables: {}, foreignKeys: {} }))
+            rs.forEach((r) => {
+                assert.strictEqual(r.isErr, true)
+                assert.strictEqual(r.v.original.code, 'SQLITE_CANTOPEN')
+            })
         })
 
-        it('R5 外鍵查詢失敗(foreign keys catch): funLog拋錯、回傳reject之promise、console.error拋錯, 皆仍照常建出表', async function() {
+        it('R5 R10 外鍵查詢失敗(foreign keys catch): funLog拋錯、回傳reject之promise、console.error拋錯, 皆仍reject該後端錯誤(code保留)', async function() {
             let rs = await survive(withForeignKeysFail)
             assert.strictEqual(rs.length, 3)
-            rs.forEach((r) => assert.deepStrictEqual(Object.keys(r.tables).sort(), ['depts', 'users']))
+            rs.forEach((r) => {
+                assert.strictEqual(r.isErr, true)
+                assert.strictEqual(r.v.code, 'ELOGIN')
+            })
         })
 
-        it('R5 describeTable失敗(tables catch)與外鍵查詢同輪失敗: 三種異常皆仍resolve', async function() {
+        it('R5 R10 describeTable失敗(tables catch)與外鍵查詢同輪失敗: 三種異常皆仍reject(外鍵之錯誤)', async function() {
             let rs = await survive((fn) => withForeignKeysFail(() => withDescribeFail(fn)))
             assert.strictEqual(rs.length, 3)
-            rs.forEach((r) => assert.ok(r.tables !== undefined))
+            rs.forEach((r) => {
+                assert.strictEqual(r.isErr, true)
+                assert.strictEqual(r.v.code, 'ELOGIN')
+            })
         })
 
     })

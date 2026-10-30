@@ -122,6 +122,89 @@ async function withShowAllTablesFail(fn, mkErr = mkSecretErr) {
 }
 
 
+//withDescribeFail, 使指定表的describeTable失敗(其餘表照常): mkErr回傳之值為reject值, 預設錯誤文字夾帶帳密
+async function withDescribeFail(fn, table = 'users', mkErr = mkSecretErr) {
+    let qi = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false }).getQueryInterface()
+    let proto = Object.getPrototypeOf(qi)
+    let orig = qi.describeTable
+    let restore = patch(proto, 'describeTable', function(t, ...a) {
+        if (t === table) {
+            return Promise.reject(mkErr())
+        }
+        return orig.call(this, t, ...a)
+    })
+    try {
+        return await fn()
+    }
+    finally {
+        restore()
+    }
+}
+
+
+//withForeignKeysFail, 使mapForeignKeys之PRAGMA foreign_key_list(表名);查詢失敗(describeTable內之同名查詢帶反引號, 不受影響): mkErr回傳之值為reject值, 預設錯誤文字夾帶帳密
+async function withForeignKeysFail(fn, mkErr = mkSecretErr) {
+    let orig = Sequelize.prototype.query
+    let restore = patch(Sequelize.prototype, 'query', function(sql, ...a) {
+        if (typeof sql === 'string' && /foreign_key_list\(\w+\);/.test(sql)) {
+            return Promise.reject(mkErr())
+        }
+        return orig.call(this, sql, ...a)
+    })
+    try {
+        return await fn()
+    }
+    finally {
+        restore()
+    }
+}
+
+
+//outcome, 取promise之了結結果: { state: 'resolved'|'rejected'|'pending', v }; 了結即回, 逾ms仍未了結者為pending(僅為懸置之防護上限, 非斷言之同步點)
+function outcome(pm, ms = 10000) {
+    let timer = null
+    let guard = new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ state: 'pending', v: undefined }), ms)
+    })
+    let done = pm.then((v) => ({ state: 'resolved', v }), (v) => ({ state: 'rejected', v }))
+    return Promise.race([done, guard]).finally(() => clearTimeout(timer))
+}
+
+
+//watchUnhandled, 執行fn期間(含其後短暫觀察窗)收集unhandledRejection之值: 回傳{ res, seen }
+async function watchUnhandled(fn, ms = 60) {
+    let seen = []
+    let onRej = (e) => seen.push(e)
+    process.on('unhandledRejection', onRej)
+    try {
+        let res = await fn()
+        await settle(ms)
+        return { res, seen }
+    }
+    finally {
+        process.off('unhandledRejection', onRej)
+    }
+}
+
+
+//countClose, 執行fn期間計算Sequelize.prototype.close之呼叫次數(連線是否關閉): 回傳{ res, n }
+async function countClose(fn) {
+    let n = 0
+    let orig = Sequelize.prototype.close
+    let restore = patch(Sequelize.prototype, 'close', function(...a) {
+        n++
+        return orig.apply(this, a)
+    })
+    try {
+        let res = await fn()
+        return { res, n }
+    }
+    finally {
+        restore()
+    }
+}
+
+
 //withWriteFileFail, 使fs.writeFile(寫出模型檔)以給定之值失敗: 值由mkErr回傳, 送回auto.run之callback, 本套件由pm.reject交出
 async function withWriteFileFail(fn, mkErr) {
     let restore = patch(fs, 'writeFile', (p, data, cb) => {
@@ -136,4 +219,4 @@ async function withWriteFileFail(fn, mkErr) {
 }
 
 
-export { mkDb, capture, settle, patch, PW, USER, mkSecretErr, withShowAllTablesFail, withWriteFileFail }
+export { mkDb, capture, settle, patch, PW, USER, mkSecretErr, withShowAllTablesFail, withDescribeFail, withForeignKeysFail, outcome, watchUnhandled, countClose, withWriteFileFail }

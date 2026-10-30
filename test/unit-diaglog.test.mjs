@@ -79,14 +79,27 @@ describe('R8 站點全集(R-DIAG-01)', function() {
             'diag(\'sql\', { stmt: getSqlStmt(sql) }, () => sql)',
             'diag(label, diag.brief(err), () => err, \'error\')',
         ])
-        //logErr之呼叫端(auto-sequelize.js)只有兩個固定標籤
+        //logErr之呼叫端(auto-sequelize.js)只有兩個固定標籤, 共三個站點(建表清單失敗、外鍵查詢失敗、描述表失敗), 皆於記錄後以同一錯誤呼叫callback(R10)
         assert.deepStrictEqual(linesOf('auto-sequelize.js', /\blogErr\(/), [
-            'if (err) self.logErr(\'foreign keys catch\', err)',
+            'self.logErr(\'tables catch\', err)',
+            'self.logErr(\'foreign keys catch\', err)',
             'if (err) self.logErr(\'tables catch\', err)',
         ])
+        let code = codeOf('auto-sequelize.js')
+        assert.ok(/function failTables\(err\) \{\s*self\.logErr\('tables catch', err\)\s*callback\(err\)\s*\}/.test(code))
+        assert.ok(/if \(err\) \{\s*self\.logErr\('foreign keys catch', err\)\s*return callback\(err\)\s*\}/.test(code))
+        assert.ok(/if \(err\) self\.logErr\('tables catch', err\)\s*callback\(err\)/.test(code))
     })
 
-    it('R8 pm.reject站點: 固定詞彙(need xxx)不經遮罩, 其餘(後端/fs之外來值)一律經diag.err', function() {
+    it('R10 失敗以同一錯誤結束: generateText遇err即關閉連線並callback(err)(不產生模型檔); write之建立輸出資料夾於try內, 失敗以該fs錯誤callback(不同步拋出)', function() {
+        let code = codeOf('auto-sequelize.js')
+        assert.ok(/function generateText\(err\) \{\s*let quoteWrapper = '"'\s*if \(err\) \{\s*self\.sequelize\.close\(\)\s*return callback\(err\)\s*\}/.test(code))
+        assert.ok(/try \{\s*fs\.mkdirSync\(path\.resolve\(self\.options\.directory\), \{ recursive: true \}\)\s*\}\s*catch \(err\) \{\s*return callback\(err\)\s*\}/.test(code))
+        //fs.mkdirSync全檔恰一處(於上述try內)
+        assert.strictEqual(linesOf('auto-sequelize.js', /\bmkdirSync\(/).length, 1)
+    })
+
+    it('R8 pm.reject站點: 固定詞彙(need xxx、invalid opt.directory)不經遮罩, 其餘(後端/fs之外來值)一律經diag.err', function() {
         let ls = linesOf('WAutoSequelize.mjs', /\bpm\.reject\(/)
         assert.deepStrictEqual(ls, [
             'pm.reject(\'need database\')',
@@ -94,6 +107,7 @@ describe('R8 站點全集(R-DIAG-01)', function() {
             'pm.reject(\'need password\')',
             'pm.reject(\'need dialect\')',
             'pm.reject(\'need port\')',
+            'pm.reject(\'invalid opt.directory: must be a string\')',
             'pm.reject(diag.err(err))',
         ])
     })

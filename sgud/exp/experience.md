@@ -2,6 +2,19 @@
 
 本檔為執行工作時特有之累積經驗,留給後續之嘗試、執行與判斷,由agent自行編列、擴充與維護.過長時抽出舊者為`experience_<年月日>.md`,並於本檔註明何時抽出.
 
+## autoseq(2026-10-31):失敗改reject、輸出夾建立失敗(排程第188項)
+
+- **懸置之根因是「同步throw落在promise回呼鏈內」**:`write()`由`generateText`之`async.each`完成回呼呼叫,而整條鏈在`showAllTables().then(...)`內;同步`fs.mkdirSync`拋錯無人接,成為`unhandledRejection`,`pm`永不結算.修法不是在`WAutoSequelize`外包try,而是在拋出點(`write()`)try/catch後走`callback(err)`——失敗通道只能是`callback`.同理`path.resolve(非字串)`亦同步拋且訊息帶值,故型別錯誤須於連線前以固定字串拒收.
+- **「只記錄」不是設計,是err傳遞被截斷**:`build`之失敗分支本就把`callback`當錯誤回呼,`generateText(err)`卻只`logErr`後續行;改法是在三個站點(清單、外鍵、描述表)記錄後`callback(err)`.外鍵查詢先於描述表,故外鍵失敗須即停(不再描述表),否則同輪會有兩筆診斷輸出而reject值只有一個.
+- **失敗路徑要自己關連線**:`generateText`原只在成功路徑(`async.each`完成回呼)`sequelize.close()`;失敗改早退後須補`close()`(測試以`Sequelize.prototype.close`計次斷言恰1次).
+- **測試以`outcome()`判「懸置」**:`Promise.race([done, 逾時])`,逾時上限只作防護(10秒)而非同步點;修前紅為pending(真實),修後立即結算.「promise是否永不結束」不能用`await`直接寫(測試本身會掛住).
+- **`ECUSTOM`之類自訂code不進摘要**:`errCode`只收宣告集合(sqlite/mysql/mssql/sqlstate),測試之`plainErr`用`SQLITE_BUSY`才能同時斷言摘要有`errCode`.
+- **外鍵查詢對每個表各查一次**:覆寫`Sequelize.prototype.query`使`foreign_key_list`失敗時,`mkErr`被呼叫表數次(此處2次),reject者為先失敗者;斷言用「`origs.length >= 1`且reject值不在origs內」,不寫死次數.
+- **wsemi升版後共用語料會新增wire案**:1.9.33新增A11、C14、U22,`api-diaglog-wire`之「wire案皆已分類」測試即失敗(此為設計);逐案讀語料判定適用與否再補`NOT_APPLICABLE`(本套件三案皆不適用,理由已寫於測試).
+- **變異腳本之NOAPPLY**:被比對字串若同時出現於註解(如`pm.reject(diag.err(err))`於註解與程式碼各一)則「恰出現1次」檢查擋下;改用含前後行之上下文字串.變異用`--bail`:懸置類變異無需等整套逾時(每個變異約1~5秒,23個共約30秒).
+- **修前紅之取法同mig-autoseq**:`git archive HEAD src test package.json | tar -x -C ./tmp/autoseq/pre`,再把最終版測試複製進去、以repo根為cwd跑`./tmp/autoseq/pre/test/*.test.mjs`;須同時複製`test/tools/`(夾具新增了`outcome`等).
+- **`npm i wsemi@latest`之副作用同前**:重排`package.json`相依字母序並補結尾換行,收尾以Edit還原,使diff只剩`wsemi`一行.
+
 ## mig-autoseq(2026-10-29):遷移至wsemi共用診斷模組(第161項)
 
 - **wsemi以`name`判類別名,不是建構子名**:`getDiagBriefErr`取「原型鏈首個`name`字串資料屬性,非`Error`即取之」,sequelize於建構時設`this.name = 'SequelizeConnectionError'`,所以`types`要宣告`Sequelize…Error`這批`name`值(grep `node_modules/sequelize/lib/errors`的`this.name =`),宣告`ConnectionError`(建構子名)不生效;不宣告則`errType`全退為`Error`(失去既有摘要).`errType`值由`ConnectionError`變`SequelizeConnectionError`列入Breaking changes.

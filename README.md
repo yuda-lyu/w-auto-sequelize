@@ -53,7 +53,39 @@ What is masked (the rules are those of `getDiagSecrets` and `maskDiagText` of ws
 
 ### Rejections and thrown errors
 
-The messages this package builds itself (`need database`, `need username`, `need password`, `need dialect`, `need port`) are fixed strings and are never altered. A value that comes from outside — the error of writing a model file, or the exception sequelize throws synchronously while the instance is created (for example a missing driver package) — passes `diag.err` of wsemi before it is rejected or thrown: when it holds no credential it is the **same object**, otherwise it is a copy of the same class with the credentials replaced by `***` (the message, the stack and the own properties, for example the `path` of a model file whose name contains the password). The returned value of the promise has no per-item `err` field (`{ tables, foreignKeys }` only).
+Every failure rejects the promise; none is only logged. The promise never stays pending and never resolves with an empty or partial result because a step failed (a database that simply has no tables is not a failure: it resolves `{ tables: {}, foreignKeys: {} }`).
+
+| Failure | Rejection value |
+|---|---|
+| a required option is missing | the fixed string `need database`, `need username`, `need password`, `need dialect` or `need port` |
+| `opt.directory` is neither a string nor empty (a number, an object, …) | the fixed string `invalid opt.directory: must be a string`; raised before any connection is made, the value is not echoed |
+| the list of tables cannot be read, a table cannot be described, or the foreign keys cannot be read (wrong host or login, unreachable file, no permission, …) | the error of the back end (the first failing step stops the run; the foreign keys are read before the tables are described); no model file is written and the connection is closed. The diagnostic output (`tables catch`, `foreign keys catch`) is still written before the promise rejects |
+| `opt.directory` cannot be created (it is an existing file, a parent of it is a file, no permission) | the error of the file system: `code` (`EEXIST`, `ENOTDIR`, `EACCES`, …) and `path` are kept, the message holds the system call and the path only |
+| a model file cannot be written | the error of the file system |
+
+The fixed strings are built by this package and are never altered. A value that comes from outside — the errors above, or the exception sequelize throws synchronously while the instance is created (for example a missing driver package, thrown instead of rejected) — passes `diag.err` of wsemi before it is rejected or thrown: when it holds no credential it is the **same object**, otherwise it is a copy of the same class with the credentials replaced by `***` (the message, the stack and the own properties, for example the `path` of a model file whose name contains the password). The returned value of the promise has no per-item `err` field (`{ tables, foreignKeys }` only).
+
+An empty `opt.directory` (`null`, `''`, `0`, `false`) means "do not create a directory and do not write model files": only the result is returned.
+
+```alias
+try {
+    let res = await was(opt)
+}
+catch (err) {
+    // reading the tables or foreign keys failed, the output directory could not be created,
+    // a model file could not be written, or an option is missing
+}
+```
+
+### Breaking changes: failures reject the promise
+
+Before (1.0.52 and earlier) a failed step was only printed, and one failure never ended at all. Now every failure rejects (see above). What changes for users:
+
+- **A failing table list, table description or foreign key query rejects.** Before, the promise resolved with empty or partial `tables` and `foreignKeys` — for a wrong host, login or an unreadable file, with `{ tables: {}, foreignKeys: {} }` — and the only trace of the failure was the diagnostic output; when only the foreign key query failed, the model files were still written, without `references`. Now the promise rejects with the error of the back end, no model file is written, and the connection is closed. The diagnostic output is unchanged (`tables catch` or `foreign keys catch` with `{ errType, errCode }` is written, or passed to `funLog`, before the promise rejects), so a log scraper keeps working. There is no option to restore the old behavior. A caller that did not handle a rejection now gets an `unhandledRejection`: add a `catch`.
+- **A database without tables still resolves** `{ tables: {}, foreignKeys: {} }` — the caller can tell it from a failure.
+- **`opt.directory` that cannot be created rejects.** For an existing file at that path (or a parent that is a file, no permission) the promise **never settled** before and Node.js reported an `unhandledRejection` (`EEXIST: file already exists, mkdir '…'` thrown inside a callback). Now it rejects with that file system error (`code`, `path`; the message holds the system call and the path only).
+- **`opt.directory` that is neither a string nor empty** (a number, an object, `true`, …) rejects with `invalid opt.directory: must be a string` before any connection is made. Before, `path.resolve` threw inside a callback and the promise never settled.
+- Downstream: `genModelsByDB` of `w-orm-reladb` returns this promise as it is, so it rejects in the same cases.
 
 ### Breaking changes: shared diagnostic module (wsemi)
 
@@ -82,7 +114,7 @@ Only what is printed changes. The value the returned promise resolves with, the 
   was({ ...opt, logging: true, funLog: (label, safe, detail) => { /* … */ } })
   ```
 - The error objects that were written with `console.error` are now written as a label and a summary (`opt.logDetail: true` prints the label and a masked copy of the error object with its class name, message, stack and properties).
-- **A step that fails is still only reported, not rejected** (as before): when the list of tables cannot be read, the promise still resolves, with empty `tables` and `foreignKeys`, and the only trace of the failure is the diagnostic output above. Watch for `tables catch` on the console or in `funLog`, or check the result. If you relied on a log scraper that matched the former `console.error` text, match the label instead.
+- In 1.0.51 a step that failed was still only reported, not rejected (as before). That has changed since: see "Breaking changes: failures reject the promise". If you relied on a log scraper that matched the former `console.error` text, match the label instead.
 - The summary may name the error class and machine code (`errType`, `errCode`); they are program identifiers, not data.
 - Not covered: a `Sequelize` instance passed as `database` (not documented; the option is a string) keeps its own logger, which this package cannot reach; `host` and the database name (other than a sqlite file path) are not credentials and can appear in `logDetail` and `funLog` details; a password of fewer than 4 characters is not masked in rejection values (it is in details); warnings that Node.js or a driver raises itself (for example a deprecation warning, `process.emitWarning`).
 

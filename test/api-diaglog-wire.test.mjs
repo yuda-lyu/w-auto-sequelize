@@ -8,8 +8,8 @@ import { mkDb, capture, patch, PW, USER, mkSecretErr, withShowAllTablesFail, wit
 
 
 //rulebook R8(依主控 dspec〈診斷輸出與遮罩〉與 wsemi R-DIAG-01): 診斷輸出與遮罩由wsemi之getDiag提供, 本檔只驗本套件之接線
-//  R8a 外來值(後端/驅動/fs回呼拋出或reject之值)於catch站點經diag.err: reject(寫出模型檔失敗)與同步throw(建構sequelize失敗)含憑證者為遮罩副本, 無憑證者為原物件; 單獨帳號與儲存路徑不遮(Q3)
-//  R8b 本套件自身以固定詞彙組成之reject(need database等)不經遮罩(密碼為其子字串時亦原樣)
+//  R8a 外來值(後端/驅動/fs回呼拋出或reject之值)於catch站點經diag.err: reject(建表清單、描述表、外鍵查詢、建立輸出資料夾與寫出模型檔失敗)與同步throw(建構sequelize失敗)含憑證者為遮罩副本, 無憑證者為原物件; 單獨帳號與儲存路徑不遮(Q3)
+//  R8b 本套件自身以固定詞彙組成之reject(need database、invalid opt.directory等)不經遮罩(密碼為其子字串時亦原樣)
 //  R8c 站點之診斷輸出: 後端錯誤值經共用語料(wsemi _diagCases之wire案)走tables catch站點, detail與safe依語料期望; 適用子集與不適用者逐一列明
 //  R8d 本套件宣告: codes(sqlite、mysql、mssql、sqlstate)、nested(original、parent)、types(Sequelize…錯誤類別名)、secrets(帳號、密碼、sqlite檔案路徑)、safeKeys(stmt)
 //  逐筆err: 本套件之回傳值僅{ tables, foreignKeys }, 無逐筆err欄位, 不適用
@@ -44,6 +44,9 @@ const NOT_APPLICABLE = {
     O15: 'safe之鍵只有本套件固定組成之stmt/errType/errCode, 無呼叫端可控之鍵可注入; 以source盤點鎖定(unit-diaglog)',
     A01: '本套件不使用genDiagFunLog(伺服端轉接器)',
     A07: '本套件不使用genDiagFunLog(伺服端轉接器)',
+    A11: '本套件不使用genDiagFunLog(伺服端轉接器; wsemi 1.9.33新增)',
+    C14: '案之判定取決於呼叫端以不同types宣告(DatabaseError、未宣告)呼叫getDiagBriefErr; 本套件之types為固定宣告(Sequelize…Error之name共12個, 由R8d types與unit-diaglog R8鎖定), 無可由呼叫端變動之宣告(wsemi 1.9.33新增)',
+    U22: '本套件不使用getDiagSecrets之conns(連線位址)來源: 帳號、密碼以選項分別給予, sqlite路徑以paths宣告(R8d secrets鎖定; wsemi 1.9.33新增)',
 }
 
 //語料之detail型案: 外來值以建表清單失敗(tables catch)交出, 斷言funLog收到之detail
@@ -63,10 +66,18 @@ function opt0(ctx, ex = {}) {
 
 
 async function runDetail(ctx, value, ex = {}) {
-    //外來值value作為showAllTables之reject值: 回傳funLog收到之呼叫
+    //外來值value作為showAllTables之reject值: 回傳funLog收到之呼叫(建表清單失敗自R10起reject, 此處只取診斷輸出, reject值另見runTablesReject)
     let got = []
-    await withShowAllTablesFail(() => was(opt0(ctx, { funLog: (...a) => got.push(a), ...ex })), () => value)
+    await withShowAllTablesFail(() => was(opt0(ctx, { funLog: (...a) => got.push(a), ...ex })).then(() => null, () => null), () => value)
     return got
+}
+
+
+async function runTablesReject(ctx, value, ex = {}) {
+    //外來值value作為showAllTables之reject值: 回傳was之reject值(未reject則拋出)
+    let r = await withShowAllTablesFail(() => was(opt0(ctx, ex)).then((res) => ({ ok: true, res }), (err) => ({ ok: false, err })), () => value)
+    assert.strictEqual(r.ok, false, '建表清單失敗時須reject')
+    return r.err
 }
 
 
@@ -150,6 +161,14 @@ describe('api-diaglog-wire', function() {
                 let out = id === 'R01' ? [value, err] : err
                 assert.strictEqual(verify(c, out, ctx), null)
             })
+
+            it(`R8c R10 ${id} ${c.fn}: ${c.label} (外來值經建表清單失敗之reject, 與寫檔失敗同一判定)`, async function() {
+                let ctx = newCtx()
+                let value = c.make(ctx)
+                let err = await runTablesReject(ctx, value)
+                let out = id === 'R01' ? [value, err] : err
+                assert.strictEqual(verify(c, out, ctx), null)
+            })
         }
 
         for (let id of ['R11', 'R12']) {
@@ -175,6 +194,10 @@ describe('api-diaglog-wire', function() {
             //need password: 無密碼可為子字串, 仍為原字串
             let { err } = await capture(() => was(getOpt({ password: null })))
             assert.strictEqual(err, 'need password')
+            //invalid opt.directory(R9): 密碼為其子字串(invalid)時仍為原字串
+            let { err: e2, isErr: isErr2 } = await capture(() => was(getOpt({ password: 'invalid', directory: 123 })))
+            assert.strictEqual(isErr2, true)
+            assert.strictEqual(e2, 'invalid opt.directory: must be a string')
         })
 
     })
@@ -302,7 +325,7 @@ describe('api-diaglog-wire', function() {
             let fwd = storage.replace(/\\/g, '/')
             let value = () => new Error(`SQLITE_CANTOPEN: open '${storage}' or '${fwd}' as ${ctx.sec.username}`)
             let got = []
-            await withShowAllTablesFail(() => was(opt0(ctx, { database: storage, funLog: (...a) => got.push(a) })), value)
+            await withShowAllTablesFail(() => was(opt0(ctx, { database: storage, funLog: (...a) => got.push(a) })).then(() => null, () => null), value)
             assert.strictEqual(got.length, 1)
             let m = got[0][2].message
             assert.ok(!m.includes(storage) && !m.includes(fwd) && !m.includes(ctx.sec.username), m)
@@ -319,15 +342,17 @@ describe('api-diaglog-wire', function() {
             assert.ok(rel !== nrm && rel !== storage && nrm !== storage, `${rel} ${nrm} ${storage}`)
             let got = []
             let value = () => new Error(`SQLITE_CANTOPEN: open '${rel}' / '${nrm}' / '${storage}'`)
-            await withShowAllTablesFail(() => was(opt0(ctx, { database: rel, funLog: (...a) => got.push(a) })), value)
+            await withShowAllTablesFail(() => was(opt0(ctx, { database: rel, funLog: (...a) => got.push(a) })).then(() => null, () => null), value)
             assert.strictEqual(got.length, 1)
             assert.strictEqual(got[0][2].message, 'SQLITE_CANTOPEN: open \'***\' / \'***\' / \'***\'')
         })
 
-        it('R8d 真實驅動(mssql連線127.0.0.1:1被拒): tables catch之safe為{ errType: SequelizeConnectionError, errCode: ESOCKET }(代碼取自original), 帳密不外流, 仍resolve空結果', async function() {
+        it('R8d R10 真實驅動(mssql連線127.0.0.1:1被拒): tables catch之safe為{ errType: SequelizeConnectionError, errCode: ESOCKET }(代碼取自original), 帳密不外流, 並reject該錯誤', async function() {
             let got = []
-            let { res, lines } = await capture(() => was({ database: 'somedb', username: USER, password: PW, dialect: 'mssql', host: '127.0.0.1', port: 1, directory: path.join(dir, 'models-mssql'), funLog: (...a) => got.push(a) }))
-            assert.deepStrictEqual(res, { tables: {}, foreignKeys: {} })
+            let { err, isErr, lines } = await capture(() => was({ database: 'somedb', username: USER, password: PW, dialect: 'mssql', host: '127.0.0.1', port: 1, directory: path.join(dir, 'models-mssql'), funLog: (...a) => got.push(a) }))
+            assert.strictEqual(isErr, true)
+            assert.strictEqual(err.name, 'SequelizeConnectionError')
+            assert.ok(!JSON.stringify([err.message, err.original && err.original.message]).includes(PW))
             assert.deepStrictEqual(lines, [])
             assert.strictEqual(got.length, 1)
             assert.strictEqual(got[0][0], 'tables catch')

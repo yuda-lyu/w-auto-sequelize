@@ -47,6 +47,7 @@ function AutoSequelize(database, username, password, options, logErr) {
     }, options || {})
 }
 
+//build(callback): 建表清單、描述表或外鍵查詢任一步失敗時, 記錄(logErr)後以該後端錯誤呼叫callback(err)並即停(不再往下查詢); 全部成功時callback無err
 AutoSequelize.prototype.build = function(callback) {
     let self = this
 
@@ -57,6 +58,12 @@ AutoSequelize.prototype.build = function(callback) {
         }, _callback)
     }
 
+    //failTables, 建表清單查詢失敗
+    function failTables(err) {
+        self.logErr('tables catch', err)
+        callback(err)
+    }
+
     if (self.options.dialect === 'postgres' && self.options.schema) {
         let showTablesSql = this.dialect.showTablesQuery(self.options.schema)
         self.sequelize.query(showTablesSql, {
@@ -64,10 +71,10 @@ AutoSequelize.prototype.build = function(callback) {
             type: self.sequelize.QueryTypes.SHOWTABLES
         }).then(function(tableNames) {
             processTables(_.flatten(tableNames))
-        }, callback)
+        }, failTables)
     }
     else {
-        this.queryInterface.showAllTables().then(processTables, callback)
+        this.queryInterface.showAllTables().then(processTables, failTables)
     }
 
     function processTables(__tables) {
@@ -84,9 +91,16 @@ AutoSequelize.prototype.build = function(callback) {
         async.each(tables, mapForeignKeys, mapTables)
 
         function mapTables(err) {
-            if (err) self.logErr('foreign keys catch', err)
+            //外鍵查詢失敗即停: 外鍵不全會使模型缺references, 故不再描述表
+            if (err) {
+                self.logErr('foreign keys catch', err)
+                return callback(err)
+            }
 
-            async.each(tables, mapTable, callback)
+            async.each(tables, mapTable, function(err) {
+                if (err) self.logErr('tables catch', err)
+                callback(err)
+            })
         }
     }
 
@@ -157,7 +171,12 @@ AutoSequelize.prototype.run = function(callback) {
 
     function generateText(err) {
         let quoteWrapper = '"'
-        if (err) self.logErr('tables catch', err)
+
+        //建表清單、描述表或外鍵查詢失敗(已於build記錄): 關閉連線後以該錯誤結束, 不產生也不寫出模型檔
+        if (err) {
+            self.sequelize.close()
+            return callback(err)
+        }
 
         async.each(_.keys(self.tables), function(table, _callback) {
             let fields = _.keys(self.tables[table])
@@ -456,8 +475,14 @@ AutoSequelize.prototype.write = function(attributes, typescriptFiles, callback) 
     let tables = _.keys(attributes)
     let self = this
 
-    //mkdirp.sync(path.resolve(self.options.directory))
-    fs.mkdirSync(path.resolve(self.options.directory), { recursive: true })
+    //建立輸出資料夾, 失敗(如directory為既有檔案、無權限)以該fs錯誤呼叫callback: 本函數在promise之then回呼鏈內執行, 同步拋出會成為unhandledRejection, 使回傳之promise永不結束
+    try {
+        //mkdirp.sync(path.resolve(self.options.directory))
+        fs.mkdirSync(path.resolve(self.options.directory), { recursive: true })
+    }
+    catch (err) {
+        return callback(err)
+    }
 
     async.each(tables, createFile, !self.options.eslint ? callback : function() {
         // let engine = new CLIEngine({ fix: true })
