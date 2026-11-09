@@ -2,6 +2,16 @@
 
 本檔為執行工作時特有之累積經驗,留給後續之嘗試、執行與判斷,由agent自行編列、擴充與維護.過長時抽出舊者為`experience_<年月日>.md`,並於本檔註明何時抽出.
 
+## ms116(2026-11-09):相依升版(mssql 10→12、sequelize、lodash、eslint)
+
+- **「升mssql」實為升tedious**:sequelize 6之mssql方言`_loadDialectModule("tedious")`,從不載入`mssql`;本倉devDependencies之`mssql`只是把`tedious`帶進`node_modules`(執行期實測載入`node_modules/mssql/`0檔、`tedious/`112檔).故相容性查證對象是「sequelize mssql方言 × tedious 20」:`npm pack sequelize@舊版`解到`./tmp`,`diff -rq`舊新之`lib/dialects/mssql`(此次6.37.1→6.37.8為0差異).
+- **升版前先取基準,再`npm install`**:升版後舊相依即消失,事後無法產生「前」之輸出.要在升版後仍能對照(如錯誤情境),另以`npm install --prefix ./tmp/<夾>`裝一份舊版相依,把`src/`複製進去,以`pathToFileURL`動態`import`同一支腳本跑兩邊(舊環境之`package.json`不可加`"type": "module"`,`auto-sequelize.js`為CJS).
+- **回傳值之鍵順序不定**:`tables`、`foreignKeys`之鍵順序依各表非同步查詢完成順序而變,同碼連跑兩次`result.json`即不同(模型檔本身逐位元組穩定);比對須遞迴排序鍵.先同碼跑兩次驗證比對基準穩定,再以改一字之複本做負向對照.
+- **tedious 20要求Node>=22**(engines);tedious 16對IP位址主機設TLS ServerName會觸發`DEP0123`棄用警告,tedious 20無此警告(連`127.0.0.1`時前後之差異).`encrypt`預設`true`,sequelize之mssql方言自行傳`trustServerCertificate: true`,故連Docker之自簽憑證容器免額外設定.
+- **取發行說明**:本機無`gh`;`curl -s -L -o <檔> "https://api.github.com/repos/<組織>/<庫>/releases?per_page=100"`(未認證,60次/時)後以腳本抽出指定版本段落再以Grep找`BREAKING`;第2頁可能被限流(000),第1頁100筆通常已涵蓋所需主版號.
+- **本機Docker Desktop可能未運行**(`docker version`報npipe不存在):`docker desktop start`約1分鐘就緒;MSSQL 2022映像約15秒內可連線.起容器用`docker run -d --name <自訂> -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=… -p <埠>:1433 <既有映像>`,不拉新映像,結束`docker rm -f -v <自訂>`.
+- **npm此次未重排`package.json`**:`npm install`僅改四行宣告,保持相依原順序與無結尾換行;`package-lock.json`改約900行(無`resolved`欄位,與修前同).
+
 ## autoseq(2026-10-31):失敗改reject、輸出夾建立失敗(排程第188項)
 
 - **懸置之根因是「同步throw落在promise回呼鏈內」**:`write()`由`generateText`之`async.each`完成回呼呼叫,而整條鏈在`showAllTables().then(...)`內;同步`fs.mkdirSync`拋錯無人接,成為`unhandledRejection`,`pm`永不結算.修法不是在`WAutoSequelize`外包try,而是在拋出點(`write()`)try/catch後走`callback(err)`——失敗通道只能是`callback`.同理`path.resolve(非字串)`亦同步拋且訊息帶值,故型別錯誤須於連線前以固定字串拒收.

@@ -16,6 +16,7 @@
 | R8 | 依主控dspec〈診斷輸出與遮罩〉與wsemi R-DIAG-01:外來值經`diag.err`、固定詞彙reject不包、宣告、共用語料接線 | `test/api-diaglog-wire.test.mjs`、`unit-diaglog`(R8) |
 | R9 | 輸出資料夾(`opt.directory`)建立失敗即reject、型別錯誤於連線前以固定字串reject;不懸置、無unhandledRejection | `test/api-reject.test.mjs`(R9)、`unit-diaglog`(R10) |
 | R10 | 建表清單、描述表、外鍵查詢失敗即reject(記錄後以同一錯誤結束、關閉連線、不寫模型檔) | `test/api-reject.test.mjs`(R10)、`api-diaglog`(R2 R3 R4 R5 R10)、`api-diaglog-wire`(R8c R8d R10)、`unit-diaglog`(R8 R10) |
+| R11 | 相依(`sequelize`、`mssql`/`tedious`、`lodash`、`eslint`)升版後,同一資料庫結構所產生之模型檔須逐位元組不變(前後對照) | 前後對照(未入庫,取法見R11);`npm test`全套 |
 
 ## R1 診斷輸出單一出口
 
@@ -124,9 +125,25 @@ Grep pattern: new Sequelize path: src   (只應出現在 src/auto-sequelize.js �
 
 **postgres指定schema之清單失敗**未實連(不得動docker容器),以sqlite實例加覆寫`dialect.showTablesQuery`與`sequelize.query`模擬(`api-reject`〈R10 postgres指定schema〉).
 
+## R11 相依升版之不變量:模型檔逐位元組不變(2026-11-09,ms116)
+
+**規則**:升級`sequelize`、`mssql`(實為其相依`tedious`)、`lodash`、`eslint`等相依後,對**同一個資料庫**(同一結構)以升版前、升版後之碼各產生一次,所有模型檔須逐位元組相同,回傳值`{ tables, foreignKeys }`遞迴排序鍵後相同(`tables`、`foreignKeys`之鍵順序取決於各表非同步查詢之完成順序,同碼兩次亦不同,屬既有不定行為,不屬變更);不得改`src/`去遷就升版造成之差異,差異須先回報.升版相依下限寫於`package.json`(宣告下限提高至目標版).
+
+**why**:①模型檔內容為本套件對外之主要產出(R7),相依升版只應改變驅動與工具,不應改變產出;②單元測試以sqlite對golden(`test/tools/golden-contract.json`)只涵蓋sqlite方言,mssql方言之`describeTable`、外鍵查詢與型別字串轉換(`auto-sequelize.js`之mssql分支)無入庫測試,升版須以真實資料庫補上;③sequelize 6之mssql方言載入的是`tedious`而非`mssql`(`lib/dialects/mssql/connection-manager.js`:`_loadDialectModule("tedious")`),devDependencies之`mssql`只為取得`tedious`,故「mssql升版」之實質為tedious升版(10.0.2→12.7.x,tedious 16.7.1→20.3.x),須查證sequelize之mssql方言是否相容(升版前後該目錄逐位元組相同,且以真實MSSQL驗證).
+
+**取法**(可重跑;腳本為一次性,存於主控任務資料夾證據夾,不入庫):
+1. **升版前**(`npm install`之前)先以既有`node_modules`產生基準:以Docker既有之`mcr.microsoft.com/mssql/server:2022-latest`起臨時容器(自訂名稱與埠,用完`docker rm -f -v`),建一個含多種欄位型別(int identity、nvarchar、nvarchar(max)、bit、uniqueidentifier預設`newid()`、decimal、datetime2、text、varbinary、money、rowversion、計算欄位、sql_variant等)、預設值(含`(getdate())`、`N'…'`、含單引號者)、主鍵(單一、複合)、外鍵、唯一鍵、含空白表名之資料庫,對它與一個sqlite夾具各呼叫`WAutoSequelize`一次,存模型檔與回傳值.
+2. 同碼再產生一次,確認模型檔位元組相同、回傳值僅鍵順序不同(確認比對基準可重現);比對腳本須以「改一個字之複本」做負向對照,確認會判不同.
+3. `npm install`升版,對**同一個容器內之同一資料庫**再產生一次並比對;另以舊版相依(`npm install --prefix ./tmp/<夾>`於暫存夾裝舊版)對同一資料庫跑錯誤情境(密碼錯、資料庫不存在、埠關閉、主機不存在)與SQL敘述,比對`errType`/`errCode`/訊息.
+4. 全套`npm test`、`eslint`(同組態對`src`、`test`、`toolg`、`g.mjs`)前後輸出須相同.
+
+**盤點指令**(可重跑):`Grep pattern: _\.[A-Za-z]+ path: src`(列出本套件用到之lodash函數,升版時對照其發行說明是否涉及);`Grep pattern: require\(|import  path: src`(本套件載入之模組,確認未直接載入`mssql`).
+
+**已知(ms116實測)**:lodash 4.17.21→4.18.1變動之模組為`unset`/`omit`(原型污染修補)、`template`、`random`、`fromPairs`、`compact`、`orderBy`(多為文件或語法),本套件皆未用;sequelize 6.37.1→6.37.8之`lib/dialects/mssql/`逐位元組相同,變動在`abstract/query-generator.js`(JSON cast白名單、mysql數值轉字串)、`sql-string.js`(oracle日期函數驗證)、`oracle/query-generator.js`、`postgres/query-interface.js`(外鍵查詢加schema),本套件之外鍵查詢使用自身`dialects.js`而非queryInterface之`getForeignKeyReferencesQuery`;tedious 16→20之預設值(`encrypt:true`、`trustServerCertificate:false`〔sequelize覆寫為`true`〕、TDS 7_4、連線逾時15秒、埠1433、`useUTC:true`)相同,破壞性變更為Node最低版本(17:去Node 16/19;18:內建型別宣告;19:Node>=18.17、`AbortSignal`處理重構;20:Node>=22),mssql 11:Node>=18與tedious更新、12:設定物件不再被複製、12.7:支援tedious 20.
+
 ## 改動範圍 → 測試
 
-本套件無瀏覽器e2e.改`src/WAutoSequelize.mjs`、`src/auto-sequelize.js`、`src/getSqlStmt.mjs`任一者,跑`unit-diaglog`、`api-diaglog`、`api-diaglog-wire`與`api-reject`四檔(皆為sqlite,另`api-diaglog-wire`含一案連`127.0.0.1:1`被拒之mssql真實驅動錯誤,無docker、不動使用者容器);改`src/dialects.js`、`sql-string.js`、`ts-helper.js`(模型文字產生)另須比對`golden-contract.json`(R7).升版wsemi後三檔須重跑(`_diagCases`語料隨wsemi更新).全套:`npm test`.
+本套件無瀏覽器e2e.改`src/WAutoSequelize.mjs`、`src/auto-sequelize.js`、`src/getSqlStmt.mjs`任一者,跑`unit-diaglog`、`api-diaglog`、`api-diaglog-wire`與`api-reject`四檔(皆為sqlite,另`api-diaglog-wire`含一案連`127.0.0.1:1`被拒之mssql真實驅動錯誤,無docker、不動使用者容器);改`src/dialects.js`、`sql-string.js`、`ts-helper.js`(模型文字產生)另須比對`golden-contract.json`(R7).升版wsemi後三檔須重跑(`_diagCases`語料隨wsemi更新).升版`sequelize`、`mssql`(`tedious`)、`lodash`、`eslint`須另做R11之前後對照(升版前先取基準).全套:`npm test`.
 
 ## 測試依賴
 
