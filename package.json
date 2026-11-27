@@ -1,6 +1,6 @@
 {
   "name": "w-auto-sequelize",
-  "version": "1.0.91",
+  "version": "1.0.92",
   "main": "dist/w-auto-sequelize.umd.js",
   "dependencies": {
     "async": "^3.2.6",
@@ -10,7 +10,7 @@
     "wsemi": "^1.9.82"
   },
   "devDependencies": {
-    "mssql": "^12.7.15",
+    "mssql": "^12.7.16",
     "sqlite3": "^6.0.1",
     "w-package-tools": "^1.1.32"
   },
